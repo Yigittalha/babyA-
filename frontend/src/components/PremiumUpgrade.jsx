@@ -31,44 +31,44 @@ const PremiumUpgrade = ({ onClose, onUpgrade }) => {
         getSubscriptionStatus()
       ]);
       
-      // Mock plans - gerçekçi planlar ekleyelim
+      // Mock plans - realistic plans in USD
       const mockPlans = [
         {
           id: 'premium_monthly',
           type: 'premium',
-          name: 'Premium Aylık',
-          price: 29.99,
-          originalPrice: 39.99,
+          name: 'Premium Monthly',
+          price: 19.99,
+          originalPrice: 29.99,
           duration_days: 30,
           features: [
-            'Sınırsız isim önerisi',
-            'Detaylı isim analizi',
-            'Kültürel bağlam bilgisi',
-            'Popülerlik tahmini',
-            'Benzer isimler',
-            'Favori sınırsız',
-            'Trend analizi',
-            'E-posta desteği'
+            'Unlimited name suggestions',
+            'Detailed name analysis',
+            'Cultural context info',
+            'Popularity predictions',
+            'Similar names',
+            'Unlimited favorites',
+            'Trend analysis',
+            'Email support'
           ]
         },
         {
           id: 'premium_yearly',
           type: 'premium_yearly',
-          name: 'Premium Yıllık',
+          name: 'Premium Yearly',
           price: 199.99,
           originalPrice: 359.99,
           duration_days: 365,
-          discount: '45% İndirim',
+          discount: '45% Discount',
           features: [
-            'Sınırsız isim önerisi',
-            'Detaylı isim analizi',
-            'Kültürel bağlam bilgisi',
-            'Popülerlik tahmini',
-            'Benzer isimler',
-            'Favori sınırsız',
-            'Trend analizi',
-            'Öncelikli e-posta desteği',
-            '2 ay ücretsiz'
+            'Unlimited name suggestions',
+            'Detailed name analysis',
+            'Cultural context info',
+            'Popularity predictions',
+            'Similar names',
+            'Unlimited favorites',
+            'Trend analysis',
+            'Priority email support',
+            '2 months free'
           ]
         }
       ];
@@ -235,17 +235,17 @@ const PremiumUpgrade = ({ onClose, onUpgrade }) => {
                        </div>
                        <div className="flex items-center justify-center mb-3">
                          <span className="text-4xl font-bold bg-gradient-to-r from-gray-800 to-gray-600 bg-clip-text text-transparent">
-                           ₺{plan.price}
+                           ${plan.price}
                          </span>
                          <span className="text-gray-500 ml-2 text-lg">
-                           /{plan.duration_days === 365 ? 'yıl' : 'ay'}
+                           /{plan.duration_days === 365 ? 'year' : 'month'}
                          </span>
                        </div>
                        {plan.originalPrice && (
                          <div className="flex items-center justify-center space-x-3 mb-2">
-                           <span className="text-gray-400 line-through text-base">₺{plan.originalPrice}</span>
+                           <span className="text-gray-400 line-through text-base">${plan.originalPrice}</span>
                            <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-semibold">
-                             💰 ₺{(plan.originalPrice - plan.price).toFixed(2)} tasarruf
+                             💰 ${(plan.originalPrice - plan.price).toFixed(2)} savings
                     </span>
                   </div>
                 )}
@@ -588,30 +588,30 @@ const PremiumUpgrade = ({ onClose, onUpgrade }) => {
                          <div className="bg-white rounded-xl p-4 border border-purple-100">
                            <div className="flex justify-between items-center mb-2">
                              <span className="text-gray-700 font-medium">{selectedPlan.name}</span>
-                             <span className="font-bold text-lg">₺{selectedPlan.price}</span>
+                             <span className="font-bold text-lg">${selectedPlan.price}</span>
                            </div>
                            <div className="text-xs text-gray-500">
-                             {selectedPlan.duration_days === 365 ? 'Yıllık abonelik' : 'Aylık abonelik'}
+                             {selectedPlan.duration_days === 365 ? 'Yearly subscription' : 'Monthly subscription'}
                            </div>
                          </div>
                          
                          {selectedPlan.originalPrice && (
                            <div className="flex justify-between text-green-600 bg-green-50 p-3 rounded-xl">
-                             <span className="font-medium">💚 İndirim</span>
-                             <span className="font-bold">-₺{(selectedPlan.originalPrice - selectedPlan.price).toFixed(2)}</span>
+                             <span className="font-medium">💚 Discount</span>
+                             <span className="font-bold">-${(selectedPlan.originalPrice - selectedPlan.price).toFixed(2)}</span>
                            </div>
                          )}
                          
                          <div className="flex justify-between text-gray-600 bg-blue-50 p-3 rounded-xl">
-                           <span className="font-medium">🧾 KDV (%18)</span>
-                           <span className="font-bold">₺{(selectedPlan.price * 0.18).toFixed(2)}</span>
+                           <span className="font-medium">🧾 Tax (18%)</span>
+                           <span className="font-bold">${(selectedPlan.price * 0.18).toFixed(2)}</span>
                          </div>
                          
                          <hr className="border-purple-200" />
                          
                          <div className="flex justify-between text-xl font-bold bg-gradient-to-r from-purple-100 to-pink-100 p-4 rounded-xl">
-                           <span>💰 Toplam</span>
-                           <span className="text-purple-600">₺{(selectedPlan.price * 1.18).toFixed(2)}</span>
+                           <span>💰 Total</span>
+                           <span className="text-purple-600">${(selectedPlan.price * 1.18).toFixed(2)}</span>
                          </div>
 
                          <button

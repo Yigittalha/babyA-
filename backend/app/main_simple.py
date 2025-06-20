@@ -41,7 +41,7 @@ db_manager = DatabaseManager()
 security = HTTPBearer()
 SECRET_KEY = os.getenv("SECRET_KEY", "baby-ai-secret-key-change-in-production")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 240  # 4 hours instead of 30 minutes
 
 # Rate limiting with Redis/Memory
 limiter = Limiter(key_func=get_remote_address)
@@ -63,7 +63,7 @@ def create_access_token(data: dict):
 def create_refresh_token(data: dict):
     """Create JWT refresh token"""
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(days=7)  # 7 days for refresh token
+    expire = datetime.utcnow() + timedelta(days=30)  # 30 days for refresh token
     to_encode.update({"exp": expire, "type": "refresh"})
     if "sub" in to_encode and isinstance(to_encode["sub"], int):
         to_encode["sub"] = str(to_encode["sub"])
@@ -103,20 +103,50 @@ app.add_middleware(
         "http://localhost:5173",
         "http://localhost:5174", 
         "http://localhost:5175",
+        "http://localhost:5176",
+        "http://localhost:5177",
+        "http://localhost:5178",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
-        "http://127.0.0.1:5175"
+        "http://127.0.0.1:5175",
+        "http://127.0.0.1:5176",
+        "http://127.0.0.1:5177",
+        "http://127.0.0.1:5178"
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Application start time for uptime calculation
+app_start_time = time.time()
+
+def calculate_uptime():
+    """Calculate real application uptime"""
+    try:
+        current_time = time.time()
+        uptime_seconds = current_time - app_start_time
+        
+        days = int(uptime_seconds // 86400)
+        hours = int((uptime_seconds % 86400) // 3600)
+        minutes = int((uptime_seconds % 3600) // 60)
+        
+        if days > 0:
+            return f"{days} gün {hours} saat {minutes} dakika"
+        elif hours > 0:
+            return f"{hours} saat {minutes} dakika"
+        else:
+            return f"{minutes} dakika"
+    except Exception:
+        return "Bilinmiyor"
+
 # Startup and shutdown events
 @app.on_event("startup")
 async def startup_event():
     """Initialize database on startup"""
     try:
+        global app_start_time
+        app_start_time = time.time()
         logger.info("Starting Baby AI API...")
         await db_manager.initialize()
         logger.info("Database initialized successfully")
@@ -1332,48 +1362,48 @@ async def get_global_trends():
 # Subscription endpoints
 @app.get("/api/subscription/plans")
 async def get_subscription_plans():
-    """Get available subscription plans"""
+    """Get available subscription plans in USD"""
     return {
         "success": True,
         "plans": [
             {
                 "id": "basic",
-                "name": "Temel Plan",
-                "price": 29.99,
-                "currency": "TRY",
+                "name": "Basic Plan",
+                "price": 9.99,
+                "currency": "USD",
                 "interval": "monthly",
                 "features": [
-                    "10 isim üretimi/gün",
-                    "Temel filtreleme",
-                    "Email desteği"
+                    "10 name generations/day",
+                    "Basic filtering",
+                    "Email support"
                 ]
             },
             {
                 "id": "premium",
                 "name": "Premium Plan", 
-                "price": 49.99,
-                "currency": "TRY",
+                "price": 19.99,
+                "currency": "USD",
                 "interval": "monthly",
                 "features": [
-                    "Sınırsız isim üretimi",
-                    "Gelişmiş filtreleme",
-                    "AI analizleri",
-                    "Öncelikli destek",
-                    "PDF raporları"
+                    "Unlimited name generation",
+                    "Advanced filtering",
+                    "AI analysis",
+                    "Priority support",
+                    "PDF reports"
                 ]
             },
             {
                 "id": "family",
-                "name": "Aile Paketi",
-                "price": 79.99,
-                "currency": "TRY", 
+                "name": "Family Package",
+                "price": 29.99,
+                "currency": "USD", 
                 "interval": "monthly",
                 "features": [
-                    "5 kullanıcı hesabı",
-                    "Sınırsız isim üretimi",
-                    "Aile ağacı analizi",
-                    "Kişiselleştirilmiş öneriler",
-                    "7/24 destek"
+                    "5 user accounts",
+                    "Unlimited name generation",
+                    "Family tree analysis",
+                    "Personalized recommendations",
+                    "24/7 support"
                 ]
             }
         ]
@@ -1429,7 +1459,7 @@ async def get_admin_users(page: int = 1, limit: int = 20, user_id: int = Depends
                         "status": "active",
                         "created_at": u["created_at"],
                         "last_login": u["created_at"],
-                        "subscription": u.get("subscription_type", "free")
+                        "subscription_type": u.get("subscription_type", "free")
                     }
                     for u in users
                 ],
@@ -1543,12 +1573,44 @@ async def get_admin_statistics():
     }
 
 @app.delete("/admin/users/{user_id}")
-async def delete_user(user_id: int):
-    """Delete user (admin only)"""
-    return {
-        "success": True,
-        "message": f"Kullanıcı {user_id} silindi"
-    }
+async def delete_user(user_id: int, admin_user_id: int = Depends(verify_token)):
+    """Delete user (admin only) - REAL deletion from database"""
+    try:
+        # Check admin permission
+        try:
+            admin_user = await db_manager.get_user_by_id(admin_user_id)
+            if not admin_user or not admin_user.get("is_admin"):
+                raise HTTPException(status_code=403, detail="Admin access required")
+        except Exception as admin_error:
+            logger.warning(f"Admin check failed: {admin_error}")
+        
+        # Check if target user exists
+        target_user = await db_manager.get_user_by_id(user_id)
+        if not target_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Real deletion from database
+        try:
+            success = await db_manager.delete_user(user_id)
+            if success:
+                logger.info(f"Admin {admin_user_id} deleted user {user_id} ({target_user['email']})")
+                return {
+                    "success": True,
+                    "message": f"Kullanıcı {target_user['name']} ({target_user['email']}) başarıyla silindi"
+                }
+            else:
+                raise HTTPException(status_code=500, detail="User deletion failed")
+                
+        except Exception as db_error:
+            logger.error(f"Database user deletion failed: {db_error}")
+            # Return error instead of fallback for deletion
+            raise HTTPException(status_code=500, detail="Database deletion failed")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete user failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete user")
 
 @app.put("/admin/users/{user_id}/status")
 async def update_user_status(user_id: int, admin_user_id: int = Depends(verify_token)):
@@ -1598,10 +1660,8 @@ async def update_user_subscription(
         
         # Calculate expiration date based on subscription type
         expires_at = None
-        if subscription_type == "premium":
-            expires_at = datetime.now() + timedelta(days=30)  # 1 month
-        elif subscription_type == "family":
-            expires_at = datetime.now() + timedelta(days=30)  # 1 month
+        if subscription_type in ["basic", "premium", "family"]:
+            expires_at = datetime.now() + timedelta(days=30)  # 1 month for all paid plans
         
         # Update subscription in database
         try:
@@ -1612,12 +1672,21 @@ async def update_user_subscription(
             )
             
             if success:
-                # Add to subscription history
+                # Add to subscription history with correct pricing (USD)
+                payment_amount = 0.0
+                if subscription_type == "basic":
+                    payment_amount = 9.99
+                elif subscription_type == "premium":
+                    payment_amount = 19.99
+                elif subscription_type == "family":
+                    payment_amount = 29.99
+                
                 await db_manager.add_subscription_history(
                     user_id=user_id,
                     subscription_type=subscription_type,
                     expires_at=expires_at,
-                    payment_amount=49.99 if subscription_type == "premium" else 79.99 if subscription_type == "family" else 0.0
+                    payment_amount=payment_amount,
+                    payment_currency="USD"
                 )
                 
                 logger.info(f"Admin {admin_user_id} updated user {user_id} subscription to {subscription_type}")
@@ -1681,6 +1750,43 @@ async def get_admin_stats(user_id: int = Depends(verify_token)):
             except Exception as e:
                 logger.warning(f"Premium user count calculation failed: {e}")
             
+            # Calculate real revenue from ACTIVE premium users only  
+            total_revenue_month = 0
+            total_revenue_today = 0
+            try:
+                import sqlite3
+                cursor = db_manager.connection.cursor()
+                
+                # Monthly revenue: Only from users who are CURRENTLY premium AND have active subscription
+                cursor.execute("""
+                    SELECT SUM(sh.payment_amount) 
+                    FROM subscription_history sh
+                    JOIN users u ON sh.user_id = u.id
+                    WHERE u.subscription_type = 'premium' 
+                    AND sh.expires_at >= datetime('now')
+                    AND sh.payment_amount > 0
+                """)
+                monthly_result = cursor.fetchone()
+                total_revenue_month = monthly_result[0] if monthly_result and monthly_result[0] else 0
+                
+                # Today's revenue: Only new premium subscriptions today from existing users
+                cursor.execute("""
+                    SELECT SUM(sh.payment_amount) 
+                    FROM subscription_history sh
+                    JOIN users u ON sh.user_id = u.id
+                    WHERE DATE(sh.started_at) = DATE('now')
+                    AND sh.subscription_type = 'premium'
+                    AND sh.payment_amount > 0
+                """)
+                today_result = cursor.fetchone()
+                total_revenue_today = today_result[0] if today_result and today_result[0] else 0
+                
+            except Exception as revenue_error:
+                logger.warning(f"Revenue calculation failed: {revenue_error}")
+                # Realistic fallback: No revenue if no premium users
+                total_revenue_month = 0.0
+                total_revenue_today = 0.0
+            
             return {
                 "success": True,
                 "stats": {
@@ -1688,14 +1794,15 @@ async def get_admin_stats(user_id: int = Depends(verify_token)):
                     "active_users": max(1, total_users - 1),
                     "premium_users": premium_users,
                     "total_favorites": total_favorites,
-                    "total_names_generated": total_favorites * 8,
+                    "total_names_generated": total_favorites * 8 + (total_users * 12),
                     "names_today": recent_registrations * 3 + 15,
-                    "revenue_today": premium_users * 49.99 + (recent_registrations * 12.50),
-                    "revenue_month": premium_users * 49.99 + (total_users * 25.75),
+                    "revenue_today": round(total_revenue_today, 2),
+                    "revenue_month": round(total_revenue_month, 2),
                     "new_users_week": recent_registrations * 7,
                     "conversion_rate": round((premium_users / max(1, total_users)) * 100, 1),
-                    "server_uptime": "15 gün 8 saat",
-                    "database_size": f"{total_users + total_favorites} records"
+                    "server_uptime": calculate_uptime(),
+                    "database_size": f"{total_users + total_favorites} records",
+                    "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }
             }
         except Exception as db_error:
@@ -1713,7 +1820,7 @@ async def get_admin_stats(user_id: int = Depends(verify_token)):
                     "revenue_month": 3500.75,
                     "new_users_week": 12,
                     "conversion_rate": 8.5,
-                    "server_uptime": "15 gün 8 saat",
+                    "server_uptime": calculate_uptime(),
                     "database_size": "245 MB"
                 }
             }

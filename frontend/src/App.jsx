@@ -13,7 +13,7 @@ import TrendAnalysis from './components/TrendAnalysis';
 import PremiumUpgrade from './components/PremiumUpgrade';
 import AdminPanel from './components/AdminPanel';
 import AdminLogin from './components/AdminLogin';
-import { apiService, formatError } from './services/api';
+import { apiService, formatError, api } from './services/api';
 import './index.css';
 
 // Ana uygulama component'i
@@ -67,9 +67,17 @@ function MainApp() {
     };
   }, [showMobileMenu]);
 
-  // Uygulama başlangıcında seçenekleri yükle
+  // Uygulama başlangıcında seçenekleri yükle ve monitoring sistemlerini başlat
   useEffect(() => {
     loadOptions();
+    
+    // Initialize subscription monitoring
+    api.initSubscriptionMonitoring();
+    
+    // Cleanup on unmount
+    return () => {
+      api.stopSubscriptionMonitoring();
+    };
   }, []);
 
   // Kullanıcı durumunu kontrol et

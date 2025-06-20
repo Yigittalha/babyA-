@@ -135,12 +135,14 @@ const AdminPanel = () => {
     }
   };
 
-  // Toggle user subscription
+  // Toggle user subscription with improved error handling
   const toggleUserSubscription = async (userId, currentType) => {
     const newType = currentType === 'premium' ? 'free' : 'premium';
     const action = newType === 'premium' ? 'Premium ver' : 'Premium iptal et';
+    const user = users.find(u => u.id === userId);
+    const userName = user ? `${user.name} (${user.email})` : `ID: ${userId}`;
     
-    if (!window.confirm(`Bu kullanıcıya ${action}mek istediğinizden emin misiniz?`)) {
+    if (!window.confirm(`${action}mek istediğinizden emin misiniz?\n\n${userName}\n\nYeni abonelik: ${newType === 'premium' ? '💎 Premium' : '🆓 Ücretsiz'}`)) {
       return;
     }
     
@@ -157,17 +159,45 @@ const AdminPanel = () => {
         user.id === userId ? { ...user, subscription_type: newType } : user
       ));
       
+      // Clear any errors
+      setError('');
+      
       showToast({ 
-        message: `Kullanıcı aboneliği ${newType === 'premium' ? 'premium olarak güncellendi' : 'iptal edildi'}`, 
+        message: `✨ ${userName} kullanıcısının aboneliği ${newType === 'premium' ? '💎 Premium olarak güncellendi' : '🆓 Ücretsiz olarak güncellendi'}`, 
         type: 'success' 
       });
       
       console.log('Subscription updated:', response);
     } catch (err) {
-      setError('Abonelik güncellenemedi');
       console.error('Subscription update error:', err);
+      
+      // Handle specific error cases
+      let errorMessage = 'Abonelik güncellenemedi';
+      
+      if (err.response) {
+        switch (err.response.status) {
+          case 400:
+            errorMessage = `❌ ${err.response.data?.detail || 'Geçersiz abonelik türü'}`;
+            break;
+          case 403:
+            errorMessage = '❌ Bu işlem için yetkiniz yok! Admin girişi gereklidir.';
+            break;
+          case 404:
+            errorMessage = '❌ Kullanıcı bulunamadı! Kullanıcı silinmiş olabilir.';
+            break;
+          case 500:
+            errorMessage = '❌ Sunucu hatası! Lütfen daha sonra tekrar deneyin.';
+            break;
+          default:
+            errorMessage = `❌ Bilinmeyen hata (${err.response.status}): ${err.response.data?.detail || 'Abonelik güncellenemedi'}`;
+        }
+      } else if (err.request) {
+        errorMessage = '❌ Sunucuya bağlanılamadı! İnternet bağlantınızı kontrol edin.';
+      }
+      
+      setError(errorMessage);
       showToast({ 
-        message: 'Abonelik güncellenirken hata oluştu', 
+        message: errorMessage.replace('❌ ', ''), 
         type: 'error' 
       });
     } finally {
@@ -175,25 +205,86 @@ const AdminPanel = () => {
     }
   };
 
-  // Delete user
+  // Delete user with improved error handling
   const deleteUser = async (userId) => {
-    if (!window.confirm('Bu kullanıcıyı silmek istediğinizden emin misiniz?')) {
+    // Find user info for better confirmation message
+    const user = users.find(u => u.id === userId);
+    const userName = user ? `${user.name} (${user.email})` : `ID: ${userId}`;
+    
+    if (!window.confirm(`Bu kullanıcıyı silmek istediğinizden emin misiniz?\n\n${userName}\n\nBu işlem geri alınamaz!`)) {
       return;
     }
     
     try {
+      setLoading(true);
       await apiService.delete(`/admin/users/${userId}`);
       await loadUsers(usersPage); // Refresh list
+      
+      // Show success message
+      setError(''); // Clear any previous errors
+      showToast({ 
+        message: `Kullanıcı ${userName} başarıyla silindi`, 
+        type: 'success' 
+      });
+      
     } catch (err) {
-      setError('Kullanıcı silinemedi');
       console.error('Delete user error:', err);
+      
+      // Handle specific error cases
+      let errorMessage = 'Kullanıcı silinemedi';
+      
+             if (err.response) {
+         switch (err.response.status) {
+           case 400:
+             errorMessage = `❌ ${err.response.data?.detail || 'Kullanıcı silme işlemi başarısız'}`;
+             break;
+           case 403:
+             errorMessage = '❌ Bu işlem için yetkiniz yok! Admin girişi gereklidir.';
+             break;
+           case 404:
+             errorMessage = '❌ Kullanıcı bulunamadı! Kullanıcı zaten silinmiş olabilir.';
+             break;
+           case 500:
+             errorMessage = '❌ Sunucu hatası! Lütfen daha sonra tekrar deneyin.';
+             break;
+           default:
+             errorMessage = `❌ Bilinmeyen hata (${err.response.status}): ${err.response.data?.detail || 'Kullanıcı silinemedi'}`;
+         }
+       } else if (err.request) {
+         errorMessage = '❌ Sunucuya bağlanılamadı! İnternet bağlantınızı kontrol edin.';
+       }
+      
+      setError(errorMessage);
+      
+      // Show toast notification
+      showToast({ 
+        message: errorMessage.replace('❌ ', ''), 
+        type: 'error' 
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
+  // Toast notification state
+  const [toast, setToast] = useState(null);
+
   // Toast notification helper
   const showToast = ({ message, type }) => {
-    // Simple toast implementation - in real app this would use a proper toast system
+    setToast({ message, type, id: Date.now() });
+    
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+      setToast(null);
+    }, 5000);
+    
+    // Also log to console for debugging
     console.log(`${type.toUpperCase()}: ${message}`);
+  };
+
+  // Close toast manually
+  const closeToast = () => {
+    setToast(null);
   };
 
   // Tab change handler
@@ -291,6 +382,34 @@ const AdminPanel = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
+      {/* Toast Notification */}
+      {toast && (
+        <div className="fixed top-4 right-4 z-50 animate-in slide-in-from-right duration-300">
+          <div className={`max-w-md rounded-xl shadow-2xl p-4 text-white font-semibold ${
+            toast.type === 'success' 
+              ? 'bg-gradient-to-r from-green-500 to-emerald-600' 
+              : toast.type === 'error'
+              ? 'bg-gradient-to-r from-red-500 to-red-600'
+              : 'bg-gradient-to-r from-blue-500 to-blue-600'
+          } transform hover:scale-105 transition-all duration-200`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <span className="text-xl">
+                  {toast.type === 'success' ? '✅' : toast.type === 'error' ? '❌' : 'ℹ️'}
+                </span>
+                <span className="text-sm">{toast.message}</span>
+              </div>
+              <button
+                onClick={closeToast}
+                className="ml-4 text-white hover:text-gray-200 transition-colors duration-200"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           {/* Header */}
         <div className="mb-8">
@@ -310,26 +429,38 @@ const AdminPanel = () => {
 
         {/* Navigation Tabs */}
         <div className="mb-8">
-          <div className="flex space-x-1 bg-gray-100 p-1 rounded-2xl">
-            {[
-              { id: 'stats', name: 'İstatistikler', icon: '📊' },
-              { id: 'users', name: 'Kullanıcılar', icon: '👥' },
-              { id: 'analytics', name: 'Favori Analitik', icon: '❤️📈' },
-              { id: 'system', name: 'Sistem', icon: '⚙️' }
+          <div className="flex justify-between items-center">
+            <div className="flex space-x-1 bg-gray-100 p-1 rounded-2xl">
+              {[
+                { id: 'stats', name: 'İstatistikler', icon: '📊' },
+                { id: 'users', name: 'Kullanıcılar', icon: '👥' },
+                { id: 'analytics', name: 'Favori Analitik', icon: '❤️📈' },
+                { id: 'system', name: 'Sistem', icon: '⚙️' }
               ].map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => handleTabChange(tab.id)}
-                className={`flex items-center space-x-2 px-6 py-3 rounded-xl font-semibold text-sm transition-all duration-300 ${
+                  className={`flex items-center space-x-2 px-6 py-3 rounded-xl font-semibold text-sm transition-all duration-300 ${
                     activeTab === tab.id
-                    ? 'bg-white text-indigo-600 shadow-lg transform scale-105'
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-white hover:bg-opacity-50'
+                      ? 'bg-white text-indigo-600 shadow-lg transform scale-105'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-white hover:bg-opacity-50'
                   }`}
                 >
-                <span>{tab.icon}</span>
-                <span>{tab.name}</span>
+                  <span>{tab.icon}</span>
+                  <span>{tab.name}</span>
                 </button>
               ))}
+            </div>
+            
+            {/* Refresh Button */}
+            <button
+              onClick={() => handleTabChange(activeTab)}
+              disabled={loading}
+              className="flex items-center space-x-2 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white px-4 py-2 rounded-xl font-semibold text-sm shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+            >
+              <span className={`${loading ? 'animate-spin' : ''}`}>🔄</span>
+              <span>{loading ? 'Yenileniyor...' : 'Yenile'}</span>
+            </button>
           </div>
           </div>
 
@@ -401,15 +532,15 @@ const AdminPanel = () => {
                                                 <div className="flex justify-between items-center">
                           <span className="text-gray-600">Toplam İsim Üretimi</span>
                           <span className="font-bold text-gray-900">{safeNumber(stats.stats?.total_names_generated).toLocaleString()}</span>
-                        </div>
+                </div>
                         <div className="flex justify-between items-center">
                           <span className="text-gray-600">Aylık Gelir</span>
-                          <span className="font-bold text-gray-900">₺{safeNumber(stats.stats?.revenue_month).toLocaleString()}</span>
-                        </div>
+                          <span className="font-bold text-gray-900">${safeNumber(stats.stats?.revenue_month).toLocaleString()}</span>
+                    </div>
                         <div className="flex justify-between items-center">
                           <span className="text-gray-600">Bugünkü Gelir</span>
-                          <span className="font-bold text-gray-900">₺{safeNumber(stats.stats?.revenue_today).toLocaleString()}</span>
-                        </div>
+                          <span className="font-bold text-gray-900">${safeNumber(stats.stats?.revenue_today).toLocaleString()}</span>
+                    </div>
                   </div>
                 </div>
 
@@ -421,15 +552,15 @@ const AdminPanel = () => {
                                                 <div className="flex justify-between items-center">
                           <span className="text-gray-600">Sunucu Çalışma Süresi</span>
                           <span className="font-bold text-green-600">{stats.stats?.server_uptime || 'Bilinmiyor'}</span>
-                        </div>
+                    </div>
                         <div className="flex justify-between items-center">
                           <span className="text-gray-600">Veritabanı Boyutu</span>
                           <span className="font-bold text-green-600">{stats.stats?.database_size || 'Bilinmiyor'}</span>
-                        </div>
+                    </div>
                         <div className="flex justify-between items-center">
                           <span className="text-gray-600">Dönüşüm Oranı</span>
                           <span className="font-bold text-green-600">{safePercentage(stats.stats?.conversion_rate)}%</span>
-                        </div>
+                  </div>
                 </div>
                     </div>
                   </div>
@@ -502,9 +633,12 @@ const AdminPanel = () => {
                                 >
                                   {user.subscription_type === 'premium' ? '⬇️ Premium İptal' : '⬆️ Premium Ver'}
                                 </button>
+                                
+                                {/* Delete Button - Tüm kullanıcılar için aktif */}
                             <button
                               onClick={() => deleteUser(user.id)}
-                                  className="bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1 rounded-lg text-xs font-semibold transition-colors duration-200"
+                                  className="bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1 rounded-lg text-xs font-semibold transition-colors duration-200 hover:shadow-md"
+                                  title={`${user.name} kullanıcısını sil`}
                             >
                                   🗑️ Sil
                             </button>
@@ -782,7 +916,7 @@ const AdminPanel = () => {
                     </div>
                     <div className="p-6">
                       {favorites && favorites.length > 0 ? (
-                        <div>
+                    <div>
                           {/* Quick Stats */}
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                             <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-xl">
