@@ -4,9 +4,8 @@ import { Baby, Sparkles, Loader2, Heart, Star, BookOpen } from 'lucide-react';
 const NameForm = ({ onGenerateNames, loading, options, user }) => {
   const [formData, setFormData] = useState({
     gender: 'unisex',
-    style: 'modern',
     origin: 'turkish',
-    theme: 'genel',
+    theme: 'modern',
     count: 20
   });
   
@@ -14,14 +13,16 @@ const NameForm = ({ onGenerateNames, loading, options, user }) => {
   const [isValid, setIsValid] = useState(false);
 
   const themes = [
-    { value: 'genel', label: 'Genel', icon: '🌟' },
     { value: 'nature', label: 'Doğa', icon: '🌿' },
+    { value: 'religious', label: 'Dini/İlahi', icon: '🙏' },
     { value: 'historical', label: 'Tarihi', icon: '🏛️' },
-    { value: 'literary', label: 'Edebi', icon: '📚' },
-    { value: 'spiritual', label: 'Manevi', icon: '✨' },
     { value: 'modern', label: 'Modern', icon: '🚀' },
     { value: 'traditional', label: 'Geleneksel', icon: '🏺' },
-    { value: 'international', label: 'Uluslararası', icon: '🌍' }
+    { value: 'unique', label: 'Benzersiz', icon: '💎' },
+    { value: 'royal', label: 'Asil/Kraliyet', icon: '👑' },
+    { value: 'warrior', label: 'Savaşçı', icon: '⚔️' },
+    { value: 'wisdom', label: 'Bilgelik', icon: '🧠' },
+    { value: 'love', label: 'Aşk/Sevgi', icon: '💕' }
   ];
 
   // Form validasyonu
@@ -30,10 +31,6 @@ const NameForm = ({ onGenerateNames, loading, options, user }) => {
     
     if (!formData.gender) {
       newErrors.gender = 'Cinsiyet seçimi zorunludur';
-    }
-    
-    if (!formData.style) {
-      newErrors.style = 'Stil seçimi zorunludur';
     }
     
     if (!formData.origin) {
@@ -49,7 +46,7 @@ const NameForm = ({ onGenerateNames, loading, options, user }) => {
     }
     
     setErrors(newErrors);
-    setIsValid(Object.keys(newErrors).length === 0 && formData.gender && formData.style && formData.origin && formData.theme && formData.count >= 1 && formData.count <= 100);
+    setIsValid(Object.keys(newErrors).length === 0 && formData.gender && formData.origin && formData.theme && formData.count >= 1 && formData.count <= 100);
   }, [formData]);
 
   const handleInputChange = (e) => {
@@ -193,39 +190,16 @@ const NameForm = ({ onGenerateNames, loading, options, user }) => {
           )}
         </div>
 
-        {/* Stil Seçimi */}
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-3">
-            Stil *
-          </label>
-          <select
-            name="style"
-            value={formData.style}
-            onChange={handleInputChange}
-            className={`select-modern ${errors.style ? 'border-red-500' : ''}`}
-          >
-            <option value="">Stil seçin</option>
-            <option value="modern">✨ Modern</option>
-            <option value="traditional">🏺 Geleneksel</option>
-            <option value="unique">💎 Benzersiz</option>
-            <option value="popular">⭐ Popüler</option>
-          </select>
-          {errors.style && (
-            <p className="mt-2 text-sm text-red-600 flex items-center">
-              <span className="mr-1">⚠️</span>
-              {errors.style}
-            </p>
-          )}
-        </div>
+
 
         {/* Tema Seçimi */}
         <div>
           <label className="block text-sm font-semibold text-gray-700 mb-3">
             Tema *
-            <span className="text-gray-400 ml-2 font-normal">(İsim tarzını belirler)</span>
+            <span className="text-gray-400 ml-2 font-normal">(İsim stilini ve karakterini belirler)</span>
           </label>
           
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
             {themes.map(theme => (
               <button
                 key={theme.value}
@@ -302,24 +276,7 @@ const NameForm = ({ onGenerateNames, loading, options, user }) => {
         </button>
       </form>
 
-      {/* Bilgi Notu */}
-      <div className="mt-8 p-6 bg-gradient-to-r from-blue-50 to-purple-50 rounded-2xl border border-blue-100">
-        <div className="flex items-start space-x-4">
-          <div className="flex-shrink-0">
-            <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-              <span className="text-white text-sm font-bold">i</span>
-            </div>
-          </div>
-          <div className="text-sm text-blue-800">
-            <p className="font-semibold mb-2">Nasıl Çalışır?</p>
-            <p>
-              Yapay zeka teknolojisi kullanarak seçtiğiniz kriterlere uygun, 
-              anlamlı ve kültürel olarak uygun bebek isimleri üretiyoruz. 
-              Her isim için detaylı anlam ve köken bilgisi sunuyoruz.
-            </p>
-          </div>
-        </div>
-      </div>
+
     </div>
   );
 };

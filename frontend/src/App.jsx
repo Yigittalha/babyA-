@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { Baby, Sparkles, Heart, Star, User, LogOut, Settings, Search, Plus, TrendingUp, Home, Crown } from 'lucide-react';
+import { Baby, Sparkles, Heart, Star, User, LogOut, Settings, Search, Plus, TrendingUp, Home, Crown, HelpCircle } from 'lucide-react';
 import NameForm from './components/NameForm';
 import NameResults from './components/NameResults';
 import NameAnalysis from './components/NameAnalysis';
@@ -39,6 +39,7 @@ function MainApp() {
   const [isPremiumRequired, setIsPremiumRequired] = useState(false);
   const [premiumMessage, setPremiumMessage] = useState('');
   const [blurredNames, setBlurredNames] = useState([]);
+  const [showHowItWorks, setShowHowItWorks] = useState(false);
 
   // Uygulama başlangıcında seçenekleri yükle
   useEffect(() => {
@@ -47,11 +48,24 @@ function MainApp() {
 
   // Kullanıcı durumunu kontrol et
   useEffect(() => {
+    // Önce cache'lenmiş user data'sını yükle (hızlı render için)
+    const cachedUser = localStorage.getItem('user_data');
+    if (cachedUser) {
+      try {
+        const parsedUser = JSON.parse(cachedUser);
+        setUser(parsedUser);
+      } catch (e) {
+        console.error('Cached user data parse error:', e);
+        localStorage.removeItem('user_data');
+      }
+    }
+
+    // Token varsa fresh data al
     const token = localStorage.getItem('token');
     if (token) {
       checkAuthStatus();
     }
-  }, []);
+  }, []); // Empty dependency array - sadece mount'ta çalışsın
 
   const loadOptions = async () => {
     try {
@@ -70,19 +84,41 @@ function MainApp() {
     }
   };
 
-  const checkAuthStatus = async () => {
+  const checkAuthStatus = useCallback(async () => {
     try {
+      // Önce localStorage'dan cache'lenmiş user data'sını kontrol et
+      const cachedUser = localStorage.getItem('user_data');
+      if (cachedUser) {
+        try {
+          const parsedUser = JSON.parse(cachedUser);
+          setUser(parsedUser);
+        } catch (e) {
+          console.error('Cached user data parse error:', e);
+        }
+      }
+
+      // API'dan fresh data al
       const userData = await apiService.getProfile();
       setUser(userData);
-      loadFavorites();
+      
+      // User data'sını localStorage'a cache'le
+      localStorage.setItem('user_data', JSON.stringify(userData));
+      
+      // Sadece user data aldıktan sonra favorileri yükle
+      if (userData) {
+        loadFavorites(userData.id);
+      }
     } catch (error) {
+      console.error('Auth check error:', error);
       localStorage.removeItem('token');
+      localStorage.removeItem('user_data');
       setUser(null);
     }
-  };
+  }, []); // Empty dependencies
 
-  const loadFavorites = async () => {
-    if (!user) return;
+  const loadFavorites = useCallback(async (userId = null) => {
+    // userId parametresi varsa kullan, yoksa current user'ı kontrol et
+    if (!userId && !user) return;
     
     setFavoritesLoading(true);
     try {
@@ -93,7 +129,7 @@ function MainApp() {
     } finally {
       setFavoritesLoading(false);
     }
-  };
+  }, [user]); // Sadece user değiştiğinde dependency
 
   const handleGenerateNames = async (formData) => {
     // Kullanıcı giriş yapmamışsa önce giriş yapmasını iste
@@ -116,7 +152,7 @@ function MainApp() {
         gender: formData.gender,
         language: formData.origin, // origin -> language
         theme: formData.theme,
-        extra: `Stil: ${formData.style}, İsim sayısı: ${formData.count}` // style ve count'u extra'ya ekle
+        extra: `İsim sayısı: ${formData.count}` // count'u extra'ya ekle
       };
       
       const response = await apiService.generateNames(backendRequest);
@@ -185,14 +221,22 @@ function MainApp() {
     }
   };
 
-  const handleAuthSuccess = (userData) => {
+  const handleAuthSuccess = useCallback((userData) => {
     setUser(userData);
     setShowAuthModal(false);
-    loadFavorites();
-  };
+    
+    // User data'sını cache'le
+    localStorage.setItem('user_data', JSON.stringify(userData));
+    
+    // userData'yı direkt kullan
+    if (userData) {
+      loadFavorites(userData.id);
+    }
+  }, [loadFavorites]);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('user_data'); // Cache'i temizle
     setUser(null);
     setFavorites([]);
   };
@@ -450,11 +494,6 @@ function MainApp() {
       );
     }
 
-    // Admin Paneli Sayfası
-    if (currentPage === 'admin') {
-      return <AdminPanel />;
-    }
-
     // Varsayılan olarak isim üretme sayfasına dön
     return (
       <div className="container mx-auto px-4 py-8">
@@ -528,18 +567,14 @@ function MainApp() {
                 <TrendingUp className="w-4 h-4 mr-2" />
                 Trendler
               </button>
-
-              {user && user.is_admin && (
-                <button
-                  onClick={() => setCurrentPage('admin')}
-                  className={`nav-button ${currentPage === 'admin' ? 'nav-button-active' : ''}`}
-                >
-                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                  </svg>
-                  Admin
-                </button>
-              )}
+              
+              <button
+                onClick={() => setShowHowItWorks(true)}
+                className="nav-button"
+              >
+                <HelpCircle className="w-4 h-4 mr-2" />
+                Nasıl Çalışır?
+              </button>
             </div>
             
             {headerButtons}
@@ -645,6 +680,149 @@ function MainApp() {
           onUpgrade={handlePremiumUpgrade}
         />
       )}
+
+      {/* Nasıl Çalışır Modal */}
+      {showHowItWorks && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-8">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                  🤖 Nasıl Çalışır?
+                </h2>
+                <button
+                  onClick={() => setShowHowItWorks(false)}
+                  className="text-gray-400 hover:text-gray-600 text-3xl font-light transition-colors"
+                >
+                  ×
+                </button>
+              </div>
+              
+              {/* Nasıl Çalışır İçeriği */}
+              <div className="bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 rounded-2xl p-8">
+                <div className="text-center mb-8">
+                  <p className="text-gray-600 text-lg">
+                    Yapay zeka destekli bebek ismi üretme süreci
+                  </p>
+                </div>
+
+                <div className="grid md:grid-cols-4 gap-6 mb-8">
+                  {/* Adım 1 */}
+                  <div className="text-center group">
+                    <div className="relative mb-4">
+                      <div className="w-16 h-16 mx-auto bg-gradient-to-r from-blue-500 to-blue-600 rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300">
+                        <span className="text-white text-2xl">📝</span>
+                      </div>
+                      <div className="absolute -top-2 -right-2 w-6 h-6 bg-yellow-400 rounded-full flex items-center justify-center text-xs font-bold text-gray-800">
+                        1
+                      </div>
+                    </div>
+                    <h4 className="font-bold text-gray-800 mb-2">Kriterler Seçin</h4>
+                    <p className="text-sm text-gray-600">
+                      Cinsiyet, dil, tema ve stil tercihlerinizi belirleyin
+                    </p>
+                  </div>
+
+                  {/* Adım 2 */}
+                  <div className="text-center group">
+                    <div className="relative mb-4">
+                      <div className="w-16 h-16 mx-auto bg-gradient-to-r from-purple-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300">
+                        <span className="text-white text-2xl">🧠</span>
+                      </div>
+                      <div className="absolute -top-2 -right-2 w-6 h-6 bg-yellow-400 rounded-full flex items-center justify-center text-xs font-bold text-gray-800">
+                        2
+                      </div>
+                    </div>
+                    <h4 className="font-bold text-gray-800 mb-2">AI Analizi</h4>
+                    <p className="text-sm text-gray-600">
+                      Yapay zeka kriterlerinizi analiz eder ve isim havuzunu oluşturur
+                    </p>
+                  </div>
+
+                  {/* Adım 3 */}
+                  <div className="text-center group">
+                    <div className="relative mb-4">
+                      <div className="w-16 h-16 mx-auto bg-gradient-to-r from-pink-500 to-pink-600 rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300">
+                        <span className="text-white text-2xl">✨</span>
+                      </div>
+                      <div className="absolute -top-2 -right-2 w-6 h-6 bg-yellow-400 rounded-full flex items-center justify-center text-xs font-bold text-gray-800">
+                        3
+                      </div>
+                    </div>
+                    <h4 className="font-bold text-gray-800 mb-2">İsim Üretimi</h4>
+                    <p className="text-sm text-gray-600">
+                      Kültürel ve dilsel uygunluk kontrolleri ile isimler üretilir
+                    </p>
+                  </div>
+
+                  {/* Adım 4 */}
+                  <div className="text-center group">
+                    <div className="relative mb-4">
+                      <div className="w-16 h-16 mx-auto bg-gradient-to-r from-green-500 to-green-600 rounded-2xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform duration-300">
+                        <span className="text-white text-2xl">📋</span>
+                      </div>
+                      <div className="absolute -top-2 -right-2 w-6 h-6 bg-yellow-400 rounded-full flex items-center justify-center text-xs font-bold text-gray-800">
+                        4
+                      </div>
+                    </div>
+                    <h4 className="font-bold text-gray-800 mb-2">Sonuçlar</h4>
+                    <p className="text-sm text-gray-600">
+                      Anlam, köken ve popülerlik bilgileri ile birlikte sunulur
+                    </p>
+                  </div>
+                </div>
+
+                {/* Özellikler */}
+                <div className="bg-white rounded-2xl p-6 shadow-sm">
+                  <h4 className="text-xl font-bold text-gray-800 mb-6 text-center">🌟 Özelliklerimiz</h4>
+                  <div className="grid md:grid-cols-3 gap-6">
+                    <div className="flex items-center space-x-4 p-4 bg-gradient-to-r from-blue-50 to-blue-100 rounded-xl">
+                      <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center">
+                        <span className="text-white text-lg">🌍</span>
+                      </div>
+                      <div>
+                        <p className="font-bold text-blue-800">6 Farklı Dil</p>
+                        <p className="text-sm text-blue-600">Çok kültürlü isim seçenekleri</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-4 p-4 bg-gradient-to-r from-purple-50 to-purple-100 rounded-xl">
+                      <div className="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center">
+                        <span className="text-white text-lg">🎭</span>
+                      </div>
+                      <div>
+                        <p className="font-bold text-purple-800">10 Tema</p>
+                        <p className="text-sm text-purple-600">Her zevke uygun kategoriler</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-4 p-4 bg-gradient-to-r from-green-50 to-green-100 rounded-xl">
+                      <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center">
+                        <span className="text-white text-lg">📖</span>
+                      </div>
+                      <div>
+                        <p className="font-bold text-green-800">Detaylı Bilgi</p>
+                        <p className="text-sm text-green-600">Anlam ve köken açıklamaları</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Alt Bilgi */}
+                <div className="mt-8 text-center">
+                  <div className="inline-flex items-center space-x-2 bg-white rounded-full px-6 py-3 shadow-sm">
+                    <span className="text-gray-600">Powered by</span>
+                    <span className="font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                      AI Technology
+                    </span>
+                    <span className="text-xl">🚀</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -714,12 +892,6 @@ function AdminDashboard() {
             </div>
             <div className="flex items-center space-x-4">
               <span className="text-sm text-gray-600">Hoş geldin, {adminUser?.name}</span>
-              <a 
-                href="/"
-                className="text-sm text-blue-600 hover:text-blue-800"
-              >
-                Ana Sayfa
-              </a>
               <button
                 onClick={handleLogout}
                 className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm"

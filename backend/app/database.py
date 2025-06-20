@@ -287,17 +287,22 @@ class DatabaseManager:
             return dict(row)
         return None
 
-    async def update_user_subscription(self, user_id: int, subscription_type: str, expires_at: Optional[datetime] = None):
+    async def update_user_subscription(self, user_id: int, subscription_type: str, expires_at: Optional[datetime] = None) -> bool:
         """Kullanıcının abonelik bilgilerini güncelle"""
-        cursor = self.connection.cursor()
-        
-        cursor.execute("""
-            UPDATE users 
-            SET subscription_type = ?, subscription_expires = ?
-            WHERE id = ?
-        """, (subscription_type, expires_at, user_id))
-        
-        self.connection.commit()
+        try:
+            cursor = self.connection.cursor()
+            
+            cursor.execute("""
+                UPDATE users 
+                SET subscription_type = ?, subscription_expires = ?
+                WHERE id = ?
+            """, (subscription_type, expires_at, user_id))
+            
+            self.connection.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating user subscription: {e}")
+            return False
 
     async def add_subscription_history(self, user_id: int, subscription_type: str, expires_at: Optional[datetime] = None, 
                                      payment_amount: Optional[float] = None, payment_currency: str = "TRY"):

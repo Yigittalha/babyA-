@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Heart, LogOut, Settings, Star, Home, Calendar, Mail, Shield, Activity } from 'lucide-react';
+import { User, Heart, Star, Calendar, Mail, Shield, Activity } from 'lucide-react';
 import { apiService } from '../services/api';
 
 const UserProfile = ({ user, onClose, onUpdate, onShowToast }) => {
@@ -149,7 +149,9 @@ const UserProfile = ({ user, onClose, onUpdate, onShowToast }) => {
               </div>
               <div className="flex items-center space-x-2">
                 <Shield className="w-5 h-5" />
-                <span className="text-sm">Premium Üye</span>
+                <span className="text-sm">
+                  {user.is_premium || user.subscription_type === 'premium' ? 'Premium Üye' : 'Ücretsiz Üye'}
+                </span>
               </div>
             </div>
           </div>
@@ -195,18 +197,46 @@ const UserProfile = ({ user, onClose, onUpdate, onShowToast }) => {
             </div>
           </div>
 
-          {/* Account Actions */}
+          {/* Account Information */}
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Hesap İşlemleri</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <button className="flex items-center space-x-3 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
-                <Settings className="w-5 h-5 text-gray-600" />
-                <span className="text-gray-700">Hesap Ayarları</span>
-              </button>
-              <button className="flex items-center space-x-3 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
-                <Shield className="w-5 h-5 text-gray-600" />
-                <span className="text-gray-700">Güvenlik</span>
-              </button>
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Hesap Bilgileri</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">Üyelik Türü:</span>
+                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                    user.is_premium || user.subscription_type === 'premium' 
+                      ? 'bg-purple-100 text-purple-800' 
+                      : 'bg-gray-100 text-gray-800'
+                  }`}>
+                    {user.is_premium || user.subscription_type === 'premium' ? 'Premium' : 'Ücretsiz'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">Üyelik Tarihi:</span>
+                  <span className="text-gray-900 font-medium">
+                    {new Date(user.created_at).toLocaleDateString('tr-TR')}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">Toplam Favori:</span>
+                  <span className="text-gray-900 font-medium">{favorites.length} isim</span>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">E-posta:</span>
+                  <span className="text-gray-900 font-medium truncate max-w-48">{user.email}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">Son Aktivite:</span>
+                  <span className="text-gray-900 font-medium">Bugün</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600">Durum:</span>
+                  <span className="text-green-600 font-medium">Aktif</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -337,15 +367,79 @@ const UserProfile = ({ user, onClose, onUpdate, onShowToast }) => {
                 <div className="text-sm text-gray-600">Aktif Gün</div>
               </div>
               <div className="text-center p-4 bg-purple-50 rounded-lg">
-                <div className="text-2xl font-bold text-purple-600">5</div>
+                <div className="text-2xl font-bold text-purple-600">
+                  {new Set(favorites.map(fav => fav.language)).size}
+                </div>
                 <div className="text-sm text-gray-600">Farklı Dil</div>
               </div>
               <div className="text-center p-4 bg-orange-50 rounded-lg">
-                <div className="text-2xl font-bold text-orange-600">10</div>
+                <div className="text-2xl font-bold text-orange-600">
+                  {new Set(favorites.map(fav => fav.theme)).size}
+                </div>
                 <div className="text-sm text-gray-600">Farklı Tema</div>
               </div>
             </div>
           </div>
+
+          {/* Detailed Stats */}
+          {favorites.length > 0 && (
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Favori İsim Dağılımı</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Gender Distribution */}
+                <div>
+                  <h4 className="text-md font-medium text-gray-800 mb-3">Cinsiyet Dağılımı</h4>
+                  <div className="space-y-2">
+                    {Object.entries(
+                      favorites.reduce((acc, fav) => {
+                        acc[fav.gender] = (acc[fav.gender] || 0) + 1;
+                        return acc;
+                      }, {})
+                    ).map(([gender, count]) => (
+                      <div key={gender} className="flex items-center justify-between">
+                        <span className="text-gray-600">{getGenderLabel(gender)}</span>
+                        <div className="flex items-center space-x-2">
+                          <div className="w-20 bg-gray-200 rounded-full h-2">
+                            <div 
+                              className="bg-blue-500 h-2 rounded-full" 
+                              style={{ width: `${(count / favorites.length) * 100}%` }}
+                            ></div>
+                          </div>
+                          <span className="text-sm text-gray-500 w-8">{count}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Language Distribution */}
+                <div>
+                  <h4 className="text-md font-medium text-gray-800 mb-3">Dil Dağılımı</h4>
+                  <div className="space-y-2">
+                    {Object.entries(
+                      favorites.reduce((acc, fav) => {
+                        acc[fav.language] = (acc[fav.language] || 0) + 1;
+                        return acc;
+                      }, {})
+                    ).slice(0, 5).map(([language, count]) => (
+                      <div key={language} className="flex items-center justify-between">
+                        <span className="text-gray-600">{getLanguageLabel(language)}</span>
+                        <div className="flex items-center space-x-2">
+                          <div className="w-20 bg-gray-200 rounded-full h-2">
+                            <div 
+                              className="bg-green-500 h-2 rounded-full" 
+                              style={{ width: `${(count / favorites.length) * 100}%` }}
+                            ></div>
+                          </div>
+                          <span className="text-sm text-gray-500 w-8">{count}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

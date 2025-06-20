@@ -88,13 +88,21 @@ async def rate_limit_middleware(request, call_next):
     client_ip = request.client.host
     current_time = time.time()
     
-    # Önceki istekleri temizle (1 dakika içerisindeki istekler kalacak)
+    # Admin endpoint'leri için rate limit'i gevşet
+    if request.url.path.startswith("/admin/"):
+        rate_limit_count = 200  # Admin için 200 request/dakika
+        window_time = 60
+    else:
+        rate_limit_count = 100   # Normal endpoint'ler için 100 request/dakika
+        window_time = 60
+    
+    # Önceki istekleri temizle
     _rate_limit_store[client_ip] = [
         req_time for req_time in _rate_limit_store[client_ip] 
-        if current_time - req_time < 60
+        if current_time - req_time < window_time
     ]
     
-    if len(_rate_limit_store[client_ip]) >= 30:
+    if len(_rate_limit_store[client_ip]) >= rate_limit_count:
         return JSONResponse(
             status_code=429,
             content=create_error_response(
@@ -700,6 +708,39 @@ async def get_admin_users(page: int = 1, limit: int = 20, admin_user_id: int = D
         }
     except Exception as e:
         logger.error(f"Admin users error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.put("/admin/users/{user_id}/subscription")
+async def update_user_subscription(
+    user_id: int, 
+    subscription_data: dict = Body(...),
+    admin_user_id: int = Depends(verify_admin)
+):
+    """Admin kullanıcı abonelik güncelleme"""
+    
+    try:
+        subscription_type = subscription_data.get("subscription_type", "free")
+        
+        # Subscription türünü validate et
+        if subscription_type not in ["free", "premium"]:
+            raise HTTPException(status_code=400, detail="Invalid subscription type")
+        
+        # Kullanıcının var olup olmadığını kontrol et
+        user = await db_manager.get_user_by_id(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        await db_manager.update_user_subscription(user_id, subscription_type)
+        
+        return {
+            "message": f"User {user_id} subscription updated to {subscription_type}",
+            "user_id": user_id,
+            "subscription_type": subscription_type
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin update subscription error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.delete("/admin/users/{user_id}")
