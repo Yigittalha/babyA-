@@ -40,6 +40,32 @@ function MainApp() {
   const [premiumMessage, setPremiumMessage] = useState('');
   const [blurredNames, setBlurredNames] = useState([]);
   const [showHowItWorks, setShowHowItWorks] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
+
+  // Mobile menü için click outside handler
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showMobileMenu && !event.target.closest('.mobile-menu-container')) {
+        setShowMobileMenu(false);
+      }
+    };
+
+    const handleResize = () => {
+      if (window.innerWidth >= 768) { // md breakpoint
+        setShowMobileMenu(false);
+      }
+    };
+
+    if (showMobileMenu) {
+      document.addEventListener('click', handleClickOutside);
+      window.addEventListener('resize', handleResize);
+    }
+
+    return () => {
+      document.removeEventListener('click', handleClickOutside);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [showMobileMenu]);
 
   // Uygulama başlangıcında seçenekleri yükle
   useEffect(() => {
@@ -343,68 +369,107 @@ function MainApp() {
   const headerButtons = useMemo(() => {
     if (!user) {
       return (
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2">
           {currentPage === 'results' && (
-            <button
-              onClick={handleBackToGenerate}
-              className="btn-modern-primary"
-            >
-              <Baby className="w-4 h-4 mr-2" />
-              Yeni İsim Üret
-            </button>
+            <div className="relative group">
+              <button
+                onClick={handleBackToGenerate}
+                className="p-2 rounded-lg bg-gray-50 hover:bg-purple-100 text-gray-600 hover:text-purple-600 transition-all duration-200"
+                title="Yeni İsim Üret"
+              >
+                <Baby className="w-5 h-5" />
+              </button>
+              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                Yeni İsim Üret
+              </div>
+            </div>
           )}
-          <button
-            onClick={() => setShowAuthModal(true)}
-            className="btn-modern-secondary"
-          >
-            <User className="w-4 h-4 mr-2" />
-            Giriş Yap
-          </button>
+          <div className="relative group">
+            <button
+              onClick={() => setShowAuthModal(true)}
+              className="p-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 hover:text-blue-700 transition-all duration-200"
+              title="Giriş Yap"
+            >
+              <User className="w-5 h-5" />
+            </button>
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+              Giriş Yap
+            </div>
+          </div>
         </div>
       );
     }
 
     return (
-      <div className="flex items-center space-x-3">
+      <div className="flex items-center space-x-2">
         {currentPage === 'results' && (
-          <button
-            onClick={handleBackToGenerate}
-            className="btn-modern-primary"
-          >
-            <Baby className="w-4 h-4 mr-2" />
-            Yeni İsim Üret
-          </button>
+          <div className="relative group">
+            <button
+              onClick={handleBackToGenerate}
+              className="p-2 rounded-lg bg-gray-50 hover:bg-purple-100 text-gray-600 hover:text-purple-600 transition-all duration-200"
+              title="Yeni İsim Üret"
+            >
+              <Baby className="w-5 h-5" />
+            </button>
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">
+              Yeni İsim Üret
+            </div>
+          </div>
         )}
-        <button
-          onClick={() => setShowFavorites(true)}
-          className="bg-gradient-to-r from-pink-500 to-red-500 hover:from-pink-600 hover:to-red-600 text-white px-6 py-3 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl"
-        >
-          <Heart className="w-4 h-4 mr-2" />
-          Favoriler
-        </button>
+        
+        <div className="relative group">
+          <button
+            onClick={() => setShowFavorites(true)}
+            className="p-2 rounded-lg bg-pink-50 hover:bg-pink-100 text-pink-600 hover:text-pink-700 transition-all duration-200"
+            title="Favoriler"
+          >
+            <Heart className="w-5 h-5" />
+          </button>
+          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">
+            Favoriler
+          </div>
+        </div>
+        
         {user && !user.is_premium && (
-          <button
-            onClick={handleShowPremiumUpgrade}
-            className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-6 py-3 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl"
-          >
-            <Crown className="w-4 h-4 mr-2" />
-            Premium
-          </button>
+          <div className="relative group">
+            <button
+              onClick={handleShowPremiumUpgrade}
+              className="p-2 rounded-lg bg-yellow-50 hover:bg-yellow-100 text-yellow-600 hover:text-yellow-700 transition-all duration-200"
+              title="Premium"
+            >
+              <Crown className="w-5 h-5" />
+            </button>
+            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">
+              Premium
+            </div>
+          </div>
         )}
-        <button
-          onClick={() => setShowProfile(true)}
-          className="btn-modern-secondary"
-        >
-          <Settings className="w-4 h-4 mr-2" />
-          Profil
-        </button>
-        <button
-          onClick={handleLogout}
-          className="bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600 text-white px-6 py-3 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl"
-        >
-          <LogOut className="w-4 h-4 mr-2" />
-          Çıkış
-        </button>
+        
+        <div className="relative group">
+          <button
+            onClick={() => setShowProfile(true)}
+            className="p-2 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-700 transition-all duration-200"
+            title="Profil"
+          >
+            <Settings className="w-5 h-5" />
+          </button>
+          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">
+            Profil
+          </div>
+        </div>
+        
+        <div className="relative group">
+          <button
+            onClick={handleLogout}
+            className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 transition-all duration-200"
+            title="Çıkış"
+          >
+            <LogOut className="w-5 h-5" />
+          </button>
+          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">
+            Çıkış
+          </div>
+        </div>
       </div>
     );
   }, [user, handleLogout, currentPage, handleBackToGenerate, handleShowPremiumUpgrade]);
@@ -412,9 +477,10 @@ function MainApp() {
   const mainContent = useMemo(() => {
     if (loading) {
       return (
-        <div className="flex items-center justify-center min-h-screen">
+        <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-purple-50">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <h2 className="text-2xl font-semibold text-gray-800 mb-2">Baby <span className="text-pink-500">AI</span></h2>
             <p className="text-gray-600">Yükleniyor...</p>
           </div>
         </div>
@@ -424,28 +490,272 @@ function MainApp() {
     // İsim Üretme Sayfası
     if (currentPage === 'generate') {
       return (
-        <div className="container mx-auto px-4 py-8">
-          <div className="max-w-4xl mx-auto">
-            <div className="text-center mb-12">
-              <h1 className="text-4xl font-bold text-gray-800 mb-4 mobile-text-3xl">
-                👶 Bebek İsmi Üretici
-              </h1>
-              <p className="text-xl text-gray-600 mobile-text-lg">
-                Yapay zeka destekli, kültürel ve dilsel çeşitlilikle bebek isimleri
-              </p>
+        <>
+          {/* Hero Section */}
+          <div className="hero-section">
+            {/* Background Pattern */}
+            <div className="hero-baby-pattern"></div>
+            
+            {/* Decorative Floating Elements */}
+            <div className="decorative-shape-1"></div>
+            <div className="decorative-shape-2"></div>
+            <div className="decorative-circle"></div>
+            
+            <div className="container mx-auto px-4 relative z-10">
+              <div className="max-w-5xl mx-auto text-center">
+                <div className="relative mb-8">
+                  <h1 className="hero-title text-gradient-hero">
+                    ✨ Baby <span className="text-pink-500">AI</span> ile Mükemmel İsmi Keşfedin
+                  </h1>
+                  <div className="absolute -top-6 -right-6 text-6xl opacity-20 animate-bounce-gentle">✨</div>
+                  <div className="absolute -bottom-4 -left-8 text-4xl opacity-20 animate-float">🌟</div>
+                </div>
+                
+                <p className="hero-subtitle">
+                  Yapay zeka teknolojisi ile kişiselleştirilmiş, anlamlı ve kültürel olarak uygun bebek isimleri üretin. 
+                  6 farklı dil ve 10 tema ile sınırsız kombinasyon.
+                </p>
+                
+                {/* Enhanced Stats */}
+                <div className="flex flex-wrap justify-center items-center gap-8 mb-12">
+                  <div className="text-center bg-white/50 backdrop-blur-sm rounded-2xl p-4 min-w-[120px] border border-white/20">
+                    <div className="stats-counter text-3xl font-bold text-purple-600 mb-1">68,930+</div>
+                    <div className="text-sm text-gray-600">Üretilen İsim</div>
+                  </div>
+                  <div className="text-center bg-white/50 backdrop-blur-sm rounded-2xl p-4 min-w-[120px] border border-white/20">
+                    <div className="flex items-center justify-center space-x-1 mb-2">
+                      {[...Array(5)].map((_, i) => (
+                        <span key={i} className="text-yellow-400 text-xl animate-pulse" style={{animationDelay: `${i * 0.1}s`}}>★</span>
+                      ))}
+                    </div>
+                    <div className="text-sm text-gray-600">5/5 Değerlendirme</div>
+                  </div>
+                  <div className="text-center bg-white/50 backdrop-blur-sm rounded-2xl p-4 min-w-[120px] border border-white/20">
+                    <div className="stats-counter text-3xl font-bold text-blue-600 mb-1">6</div>
+                    <div className="text-sm text-gray-600">Farklı Dil</div>
+                  </div>
+                </div>
+
+                <div className="relative">
+                  {user ? (
+                    <button 
+                      onClick={() => document.getElementById('name-form').scrollIntoView({ behavior: 'smooth' })}
+                      className="btn-hero"
+                    >
+                      ✨ İsim Üretmeye Başla
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => setShowAuthModal(true)}
+                      className="btn-hero"
+                    >
+                      🚀 Ücretsiz Başla
+                    </button>
+                  )}
+                  <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 text-2xl animate-bounce-gentle">👇</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* How It Works Section */}
+          <div className="py-20 bg-white section-with-pattern">
+            <div className="floating-element-1"></div>
+            <div className="floating-element-2"></div>
+            
+            <div className="container mx-auto px-4 section-content">
+              <div className="max-w-6xl mx-auto">
+                <div className="text-center mb-16 relative">
+                  <div className="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-8 text-4xl opacity-20">🤖</div>
+                  <h2 className="section-title text-gradient">
+                    Nasıl Çalışır?
+                  </h2>
+                  <p className="section-subtitle">
+                    3 basit adımda hayalinizdeki bebek ismini bulun
+                  </p>
+                  <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-4 text-3xl opacity-20">⚡</div>
+                </div>
+
+                <div className="grid md:grid-cols-3 gap-8 relative">
+                  {/* Connection Lines */}
+                  <div className="hidden md:block absolute top-1/2 left-1/3 w-1/3 h-0.5 bg-gradient-to-r from-purple-300 to-blue-300 transform -translate-y-1/2 z-0"></div>
+                  <div className="hidden md:block absolute top-1/2 right-1/3 w-1/3 h-0.5 bg-gradient-to-r from-blue-300 to-purple-300 transform -translate-y-1/2 z-0"></div>
+                  
+                  <div className="step-card text-center relative z-10">
+                    <div className="absolute -top-4 -right-4 text-2xl opacity-30 animate-pulse">📝</div>
+                    <div className="step-indicator mx-auto mb-6">1</div>
+                    <h3 className="text-xl font-bold text-gray-800 mb-4">Tercihlerinizi Seçin</h3>
+                    <p className="text-gray-600">
+                      Bebeğinizin cinsiyeti, dil tercihi ve istediğiniz temayı belirleyin. 
+                      10 farklı tema arasından seçim yapın.
+                    </p>
+                  </div>
+
+                  <div className="step-card text-center relative z-10">
+                    <div className="absolute -top-4 -right-4 text-2xl opacity-30 animate-pulse" style={{animationDelay: '0.5s'}}>🧠</div>
+                    <div className="step-indicator mx-auto mb-6">2</div>
+                    <h3 className="text-xl font-bold text-gray-800 mb-4">AI Analizi</h3>
+                    <p className="text-gray-600">
+                      Yapay zeka teknolojimiz tercihlerinizi analiz eder ve 
+                      kültürel uygunluk kontrolü yapar.
+                    </p>
+                  </div>
+
+                  <div className="step-card text-center relative z-10">
+                    <div className="absolute -top-4 -right-4 text-2xl opacity-30 animate-pulse" style={{animationDelay: '1s'}}>📋</div>
+                    <div className="step-indicator mx-auto mb-6">3</div>
+                    <h3 className="text-xl font-bold text-gray-800 mb-4">Sonuçları Alın</h3>
+                    <p className="text-gray-600">
+                      Anlam, köken ve popülerlik bilgileriyle birlikte 
+                      özel olarak seçilmiş isim önerilerini görün.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Features Section */}
+          <div className="py-20 bg-gradient-to-br from-purple-50 to-blue-50 relative overflow-hidden">
+            {/* Background Decorative Elements */}
+            <div className="absolute top-10 left-10 w-32 h-32 bg-gradient-to-r from-purple-200/30 to-blue-200/30 rounded-full blur-xl"></div>
+            <div className="absolute bottom-20 right-20 w-40 h-40 bg-gradient-to-r from-pink-200/30 to-purple-200/30 rounded-full blur-xl"></div>
+            <div className="absolute top-1/2 left-1/4 w-24 h-24 bg-gradient-to-r from-blue-200/20 to-indigo-200/20 rounded-full blur-lg"></div>
+            
+            {/* Floating SVG Elements */}
+            <div className="absolute top-20 right-1/4 opacity-10">
+              <svg width="60" height="60" viewBox="0 0 60 60" fill="none">
+                <path d="M30 0L37 23L60 30L37 37L30 60L23 37L0 30L23 23L30 0Z" fill="currentColor" className="text-purple-400"/>
+              </svg>
+            </div>
+            
+            <div className="absolute bottom-32 left-1/3 opacity-10 animate-float">
+              <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+                <circle cx="20" cy="20" r="20" fill="currentColor" className="text-blue-400"/>
+                <circle cx="20" cy="20" r="10" fill="white"/>
+              </svg>
             </div>
 
-            <NameForm 
-              options={options}
-              onGenerateNames={handleGenerateNames}
-              loading={loading}
-              user={user}
-              onShowToast={showToast}
-              onError={handleError}
-              onAnalyzeName={handleAnalyzeName}
-            />
+            <div className="container mx-auto px-4 relative z-10">
+              <div className="max-w-6xl mx-auto">
+                <div className="text-center mb-16 relative">
+                  <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 text-5xl opacity-20 animate-bounce-gentle">⭐</div>
+                  <h2 className="section-title text-gradient">
+                    Neden Bizleri Seçmelisiniz?
+                  </h2>
+                  <p className="section-subtitle">
+                    Gelişmiş yapay zeka teknolojisi ile üstün hizmet
+                  </p>
+                  <div className="absolute -bottom-4 right-1/4 text-3xl opacity-20 animate-pulse">💎</div>
+                </div>
+
+                <div className="grid md:grid-cols-3 gap-8">
+                  <div className="feature-card group">
+                    <div className="absolute top-4 right-4 text-lg opacity-30 group-hover:opacity-50 transition-opacity">🚀</div>
+                    <div className="feature-icon">🌍</div>
+                    <h3 className="text-xl font-bold text-gray-800 mb-4">6 Farklı Dil</h3>
+                    <p className="text-gray-600">
+                      Türkçe, İngilizce, Arapça, Farsça, Kürtçe ve Azerbaycan dili ile 
+                      çok kültürlü isim seçenekleri.
+                    </p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <span className="text-xs bg-purple-100 text-purple-600 px-2 py-1 rounded-full">🇹🇷 TR</span>
+                      <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded-full">🇬🇧 EN</span>
+                      <span className="text-xs bg-green-100 text-green-600 px-2 py-1 rounded-full">🇸🇦 AR</span>
+                    </div>
+                  </div>
+
+                  <div className="feature-card group">
+                    <div className="absolute top-4 right-4 text-lg opacity-30 group-hover:opacity-50 transition-opacity">✨</div>
+                    <div className="feature-icon">🎭</div>
+                    <h3 className="text-xl font-bold text-gray-800 mb-4">10 Tema</h3>
+                    <p className="text-gray-600">
+                      Doğa, dini, tarihi, modern ve daha birçok temada 
+                      her zevke uygun isim kategorileri.
+                    </p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <span className="text-xs bg-green-100 text-green-600 px-2 py-1 rounded-full">🌿 Doğa</span>
+                      <span className="text-xs bg-purple-100 text-purple-600 px-2 py-1 rounded-full">👑 Asil</span>
+                      <span className="text-xs bg-blue-100 text-blue-600 px-2 py-1 rounded-full">✨ Modern</span>
+                    </div>
+                  </div>
+
+                  <div className="feature-card group">
+                    <div className="absolute top-4 right-4 text-lg opacity-30 group-hover:opacity-50 transition-opacity">🔍</div>
+                    <div className="feature-icon">📖</div>
+                    <h3 className="text-xl font-bold text-gray-800 mb-4">Detaylı Bilgi</h3>
+                    <p className="text-gray-600">
+                      Her isim için anlam, köken, popülerlik ve 
+                      kültürel arka plan bilgileri.
+                    </p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <span className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded-full">📚 Anlam</span>
+                      <span className="text-xs bg-pink-100 text-pink-600 px-2 py-1 rounded-full">🏛️ Köken</span>
+                      <span className="text-xs bg-indigo-100 text-indigo-600 px-2 py-1 rounded-full">📊 Pop.</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
+
+          {/* Form Section */}
+          <div className="py-20 bg-gradient-to-b from-white to-purple-50 relative overflow-hidden" id="name-form">
+            {/* Background Decorative Elements */}
+            <div className="absolute top-1/4 left-5 w-20 h-20 bg-gradient-to-r from-purple-300/20 to-pink-300/20 rounded-full blur-lg animate-float"></div>
+            <div className="absolute bottom-1/3 right-8 w-16 h-16 bg-gradient-to-r from-blue-300/20 to-indigo-300/20 rounded-full blur-lg animate-bounce-gentle"></div>
+            
+            {/* Baby Icons Pattern */}
+            <div className="absolute top-10 right-1/4 text-6xl opacity-5 animate-float">👶</div>
+            <div className="absolute bottom-20 left-1/3 text-4xl opacity-5 animate-pulse">✨</div>
+            <div className="absolute top-1/3 left-10 text-3xl opacity-5 animate-bounce-gentle">🌟</div>
+
+            <div className="container mx-auto px-4 relative z-10">
+              <div className="max-w-4xl mx-auto">
+                <div className="text-center mb-12 relative">
+                  <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 text-4xl opacity-20 animate-pulse">🎯</div>
+                  <h2 className="section-title text-gradient">
+                    İsim Üretmeye Başlayın
+                  </h2>
+                  <p className="section-subtitle">
+                    Tercihlerinizi belirleyin ve hayalinizdeki bebek ismini keşfedin
+                  </p>
+                  <div className="absolute -bottom-2 right-1/4 text-2xl opacity-20 animate-bounce-gentle">🚀</div>
+                </div>
+
+                {/* Trust Indicators */}
+                <div className="flex justify-center items-center space-x-6 mb-8 text-sm text-gray-500">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-green-500">🔒</span>
+                    <span>Güvenli</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-blue-500">⚡</span>
+                    <span>Hızlı</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-purple-500">🎯</span>
+                    <span>Kişiselleştirilmiş</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-orange-500">💎</span>
+                    <span>Premium Kalite</span>
+                  </div>
+                </div>
+
+                <NameForm 
+                  options={options}
+                  onGenerateNames={handleGenerateNames}
+                  loading={loading}
+                  user={user}
+                  onShowToast={showToast}
+                  onError={handleError}
+                  onAnalyzeName={handleAnalyzeName}
+                />
+              </div>
+            </div>
+          </div>
+        </>
       );
     }
 
@@ -478,8 +788,8 @@ function MainApp() {
         <div className="container mx-auto px-4 py-8">
           <div className="max-w-4xl mx-auto">
             <div className="text-center mb-12">
-              <h1 className="text-4xl font-bold text-gray-800 mb-4 mobile-text-3xl">
-                👶 Bebek İsmi Trend Analizi
+              <h1 className="text-4xl font-bold bg-gradient-to-r from-gray-800 via-purple-700 to-blue-600 bg-clip-text text-transparent mb-4 mobile-text-3xl">
+                📊 Baby<span className="text-pink-500">AI</span> Trend Analizi
               </h1>
               <p className="text-xl text-gray-600 mobile-text-lg">
                 Yapay zeka destekli, kültürel ve dilsel çeşitlilikle bebek isimleri
@@ -494,31 +804,8 @@ function MainApp() {
       );
     }
 
-    // Varsayılan olarak isim üretme sayfasına dön
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="max-w-4xl mx-auto">
-          <div className="text-center mb-12">
-            <h1 className="text-4xl font-bold text-gray-800 mb-4 mobile-text-3xl">
-              👶 Bebek İsmi Üretici
-            </h1>
-            <p className="text-xl text-gray-600 mobile-text-lg">
-              Yapay zeka destekli, kültürel ve dilsel çeşitlilikle bebek isimleri
-            </p>
-          </div>
-
-          <NameForm 
-            options={options}
-            onGenerateNames={handleGenerateNames}
-            loading={loading}
-            user={user}
-            onShowToast={showToast}
-            onError={handleError}
-            onAnalyzeName={handleAnalyzeName}
-          />
-        </div>
-      </div>
-    );
+    // Varsayılan olarak generate sayfasını göster
+    return mainContent;
   }, [loading, showToast, handleError, handleAnalyzeName, options, results, user, currentPage, handleBackToGenerate, handleAddToFavorites, isPremiumRequired, premiumMessage, handleShowPremiumUpgrade, blurredNames]);
 
   if (loading) {
@@ -526,7 +813,7 @@ function MainApp() {
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-blue-50 to-purple-50">
         <div className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <h2 className="text-2xl font-semibold text-gray-800 mb-2">Bebek İsmi Üretici</h2>
+          <h2 className="text-2xl font-semibold text-gray-800 mb-2">Baby <span className="text-pink-500">AI</span></h2>
           <p className="text-gray-600">Yükleniyor...</p>
         </div>
       </div>
@@ -536,48 +823,236 @@ function MainApp() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50">
       {/* Header */}
-      <header className="glass-effect sticky top-0 z-40">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex justify-between items-center">
-            <div className="flex items-center space-x-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-10 h-10 bg-gradient-to-r from-purple-600 to-pink-600 rounded-2xl flex items-center justify-center animate-float">
-                  <span className="text-white font-bold text-lg">👶</span>
-                </div>
-                <h1 className="text-2xl font-bold text-gradient mobile-text-lg">
-                  Bebek İsmi Üretici
+      <header className="glass-effect sticky top-0 z-40 border-b border-white/20">
+        <div className="container mx-auto px-4 py-3">
+          <div className="flex items-center justify-between">
+            {/* Left Side - Logo */}
+            <div className="flex items-center space-x-3">
+              {/* Simple Cute Baby Logo */}
+              <div className="relative group">
+                {/* Cute Baby Face SVG - No container boxes */}
+                <svg 
+                  className="w-10 h-10 mobile-logo-svg text-gray-700 hover:text-purple-600 transition-colors duration-300 cursor-pointer" 
+                  viewBox="0 0 60 60" 
+                  fill="none"
+                >
+                  {/* Decorative stars around baby */}
+                  <circle cx="15" cy="15" r="1" fill="currentColor" className="opacity-40"/>
+                  <circle cx="45" cy="15" r="1" fill="currentColor" className="opacity-40"/>
+                  <circle cx="12" cy="35" r="0.8" fill="currentColor" className="opacity-30"/>
+                  <circle cx="48" cy="35" r="0.8" fill="currentColor" className="opacity-30"/>
+                  
+                  {/* Baby face circle */}
+                  <circle cx="30" cy="30" r="12" stroke="currentColor" strokeWidth="2" fill="none"/>
+                  
+                  {/* Hair/curl on top */}
+                  <path d="M25 20 Q23 18 25 16 Q27 18 25 20" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                  
+                  {/* Eyes */}
+                  <circle cx="26" cy="27" r="1.5" fill="currentColor"/>
+                  <circle cx="34" cy="27" r="1.5" fill="currentColor"/>
+                  
+                  {/* Rosy cheeks */}
+                  <ellipse cx="22" cy="31" rx="2" ry="1.5" fill="#ff6b9d" opacity="0.6"/>
+                  <ellipse cx="38" cy="31" rx="2" ry="1.5" fill="#ff6b9d" opacity="0.6"/>
+                  
+                  {/* Smile */}
+                  <path d="M26 33 Q30 36 34 33" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
+                  
+                  {/* Small decorative elements */}
+                  <circle cx="18" cy="22" r="0.5" fill="currentColor" className="opacity-30"/>
+                  <circle cx="42" cy="38" r="0.5" fill="currentColor" className="opacity-30"/>
+                </svg>
+              </div>
+              
+              {/* Brand Typography */}
+              <div className="flex flex-col">
+                <h1 className="text-2xl mobile-brand-title font-bold bg-gradient-to-r from-gray-800 via-purple-700 to-blue-600 bg-clip-text text-transparent mobile-text-lg leading-tight">
+                  Baby <span className="text-pink-500">AI</span>
                 </h1>
+                <p className="text-xs mobile-brand-subtitle text-gray-500 font-medium -mt-1">
+                  Baby name creator
+                </p>
               </div>
             </div>
             
-            {/* Navigasyon Butonları */}
-            <div className="flex items-center space-x-2">
+            {/* Center - Main Navigation */}
+            <nav className="hidden md:flex items-center space-x-8">
               <button
                 onClick={() => setCurrentPage('generate')}
-                className={`nav-button ${currentPage === 'generate' ? 'nav-button-active' : ''}`}
+                className={`px-5 py-2 rounded-lg text-base font-semibold transition-all duration-200 ${
+                  currentPage === 'generate' 
+                    ? 'bg-purple-100 text-purple-700 shadow-sm' 
+                    : 'text-gray-700 hover:text-purple-600 hover:bg-purple-50'
+                }`}
               >
-                <Home className="w-4 h-4 mr-2" />
                 Ana Sayfa
               </button>
               
               <button
                 onClick={() => setCurrentPage('trends')}
-                className={`nav-button ${currentPage === 'trends' ? 'nav-button-active' : ''}`}
+                className={`px-5 py-2 rounded-lg text-base font-semibold transition-all duration-200 ${
+                  currentPage === 'trends' 
+                    ? 'bg-purple-100 text-purple-700 shadow-sm' 
+                    : 'text-gray-700 hover:text-purple-600 hover:bg-purple-50'
+                }`}
               >
-                <TrendingUp className="w-4 h-4 mr-2" />
                 Trendler
               </button>
               
               <button
                 onClick={() => setShowHowItWorks(true)}
-                className="nav-button"
+                className="px-5 py-2 rounded-lg text-base font-semibold text-gray-700 hover:text-purple-600 hover:bg-purple-50 transition-all duration-200"
               >
-                <HelpCircle className="w-4 h-4 mr-2" />
                 Nasıl Çalışır?
               </button>
-            </div>
+            </nav>
             
-            {headerButtons}
+            {/* Right Side - User Actions & Mobile Menu */}
+            <div className="flex items-center space-x-3">
+              {/* Desktop User Actions */}
+              <div className="hidden md:flex items-center">
+                {headerButtons}
+              </div>
+              
+              {/* Mobile Menu */}
+              <div className="md:hidden relative mobile-menu-container">
+                <button
+                  onClick={() => setShowMobileMenu(!showMobileMenu)}
+                  className="p-2 rounded-lg text-gray-600 hover:text-purple-600 hover:bg-purple-50 transition-all duration-200"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  </svg>
+                </button>
+                
+                {/* Mobile Dropdown Menu */}
+                {showMobileMenu && (
+                  <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-2xl border border-gray-100 py-2 z-50"
+                       style={{ animation: 'fadeIn 0.2s ease-out' }}>
+                    <button
+                      onClick={() => {
+                        setCurrentPage('generate');
+                        setShowMobileMenu(false);
+                      }}
+                      className={`w-full px-4 py-3 text-left text-sm font-medium transition-all duration-200 ${
+                        currentPage === 'generate' 
+                          ? 'bg-purple-50 text-purple-700 border-r-2 border-purple-500' 
+                          : 'text-gray-600 hover:bg-purple-50 hover:text-purple-600'
+                      }`}
+                    >
+                      Ana Sayfa
+                    </button>
+                    
+                    <button
+                      onClick={() => {
+                        setCurrentPage('trends');
+                        setShowMobileMenu(false);
+                      }}
+                      className={`w-full px-4 py-3 text-left text-sm font-medium transition-all duration-200 ${
+                        currentPage === 'trends' 
+                          ? 'bg-purple-50 text-purple-700 border-r-2 border-purple-500' 
+                          : 'text-gray-600 hover:bg-purple-50 hover:text-purple-600'
+                      }`}
+                    >
+                      Trendler
+                    </button>
+                    
+                    <button
+                      onClick={() => {
+                        setShowHowItWorks(true);
+                        setShowMobileMenu(false);
+                      }}
+                      className="w-full px-4 py-3 text-left text-sm font-medium text-gray-600 hover:bg-purple-50 hover:text-purple-600 transition-all duration-200"
+                    >
+                      Nasıl Çalışır?
+                    </button>
+                    
+                    <div className="border-t border-gray-100 my-2"></div>
+                    
+                    {/* Mobile Header Buttons */}
+                    <div className="px-2">
+                      {user ? (
+                        <>
+                          {currentPage === 'results' && (
+                            <button
+                              onClick={() => {
+                                handleBackToGenerate();
+                                setShowMobileMenu(false);
+                              }}
+                              className="w-full mb-2 bg-gradient-to-r from-purple-500 to-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+                            >
+                              Yeni İsim Üret
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setShowFavorites(true);
+                              setShowMobileMenu(false);
+                            }}
+                            className="w-full mb-2 bg-gradient-to-r from-pink-500 to-red-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+                          >
+                            Favoriler
+                          </button>
+                          {!user.is_premium && (
+                            <button
+                              onClick={() => {
+                                handleShowPremiumUpgrade();
+                                setShowMobileMenu(false);
+                              }}
+                              className="w-full mb-2 bg-gradient-to-r from-purple-500 to-pink-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+                            >
+                              Premium
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setShowProfile(true);
+                              setShowMobileMenu(false);
+                            }}
+                            className="w-full mb-2 bg-gray-100 text-gray-700 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+                          >
+                            Profil
+                          </button>
+                          <button
+                            onClick={() => {
+                              handleLogout();
+                              setShowMobileMenu(false);
+                            }}
+                            className="w-full bg-gradient-to-r from-red-500 to-pink-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+                          >
+                            Çıkış
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          {currentPage === 'results' && (
+                            <button
+                              onClick={() => {
+                                handleBackToGenerate();
+                                setShowMobileMenu(false);
+                              }}
+                              className="w-full mb-2 bg-gradient-to-r from-purple-500 to-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+                            >
+                              Yeni İsim Üret
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setShowAuthModal(true);
+                              setShowMobileMenu(false);
+                            }}
+                            className="w-full bg-gradient-to-r from-blue-500 to-purple-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200"
+                          >
+                            Giriş Yap
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </header>
@@ -941,4 +1416,4 @@ function App() {
   );
 }
 
-export default React.memo(App); 
+export default App; 

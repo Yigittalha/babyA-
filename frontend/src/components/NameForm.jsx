@@ -102,32 +102,21 @@ const NameForm = ({ onGenerateNames, loading, options, user }) => {
   };
 
   return (
-    <div className="modern-card max-w-2xl mx-auto mobile-padding">
-      <div className="text-center mb-8">
-        <div className="flex justify-center mb-6">
-          <div className="p-4 bg-gradient-to-r from-purple-100 to-pink-100 rounded-2xl animate-float">
-            <Baby className="w-10 h-10 text-purple-600" />
-          </div>
-        </div>
-        <h2 className="mobile-text-2xl font-bold text-gradient mb-3">
-          Bebek İsmi Üret
-        </h2>
-        <p className="text-gray-600 mobile-text-lg">
-          Yapay zeka ile kişiselleştirilmiş bebek isimleri oluşturun
-        </p>
-        
-        {/* Giriş yapmamış kullanıcılar için uyarı */}
-        {!user && (
-          <div className="mt-4 p-4 bg-gradient-to-r from-yellow-50 to-orange-50 rounded-xl border border-yellow-200">
-            <div className="flex items-center justify-center space-x-2 text-yellow-800">
-              <span className="text-lg">🔐</span>
-              <span className="text-sm font-medium">
-                İsim üretmek için giriş yapmanız gerekiyor
-              </span>
+    <div className="form-container max-w-3xl mx-auto mobile-padding">
+      {/* Giriş yapmamış kullanıcılar için uyarı */}
+      {!user && (
+        <div className="mb-8 p-6 bg-gradient-to-r from-yellow-50 to-orange-50 rounded-2xl border-2 border-yellow-200 shadow-lg">
+          <div className="flex items-center justify-center space-x-3 text-yellow-800">
+            <div className="w-12 h-12 bg-yellow-400 rounded-full flex items-center justify-center">
+              <span className="text-white text-xl">🔐</span>
+            </div>
+            <div>
+              <p className="font-bold text-lg">Giriş Yapın</p>
+              <p className="text-sm">İsim üretmek için lütfen hesabınıza giriş yapın</p>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="mobile-space-y-6">
         {/* Cinsiyet Seçimi */}
@@ -248,32 +237,40 @@ const NameForm = ({ onGenerateNames, loading, options, user }) => {
         </div>
 
         {/* Gönder Butonu */}
-        <button
-          type="submit"
-          disabled={!isValid || loading}
-          className={`w-full py-5 px-8 rounded-2xl font-bold text-white transition-all duration-300 touch-button ${
-            isValid && !loading
-              ? 'btn-modern-primary'
-              : 'bg-gray-300 cursor-not-allowed'
-          }`}
-        >
-          {loading ? (
-            <div className="flex items-center justify-center space-x-3">
-              <Loader2 className="w-6 h-6 animate-spin" />
-              <span>İsimler Üretiliyor...</span>
-            </div>
-          ) : !user ? (
-            <div className="flex items-center justify-center space-x-3">
-              <span className="text-lg">🔐</span>
-              <span>Giriş Yap ve İsim Oluştur</span>
-            </div>
-          ) : (
-            <div className="flex items-center justify-center space-x-3">
-              <Sparkles className="w-6 h-6" />
-              <span>İsim Oluştur</span>
-            </div>
+        <div className="text-center pt-4">
+          <button
+            type="submit"
+            disabled={!isValid || loading}
+            className={`w-full py-6 px-8 rounded-2xl font-bold text-lg transition-all duration-300 touch-button ${
+              isValid && !loading
+                ? 'btn-modern-primary'
+                : 'bg-gray-300 cursor-not-allowed text-gray-500'
+            }`}
+          >
+            {loading ? (
+              <div className="flex items-center justify-center space-x-3">
+                <Loader2 className="w-6 h-6 animate-spin" />
+                <span>İsimler Üretiliyor...</span>
+              </div>
+            ) : !user ? (
+              <div className="flex items-center justify-center space-x-3">
+                <span className="text-xl">🔐</span>
+                <span>Giriş Yap ve İsim Oluştur</span>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center space-x-3">
+                <Sparkles className="w-6 h-6" />
+                <span>✨ Mükemmel İsmi Bul</span>
+              </div>
+            )}
+          </button>
+
+          {user && (
+            <p className="mt-4 text-sm text-gray-500">
+              🎯 Yapay zeka teknolojisi ile kişiselleştirilmiş sonuçlar alın
+            </p>
           )}
-        </button>
+        </div>
       </form>
 
 
