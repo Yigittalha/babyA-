@@ -95,7 +95,7 @@ class NameGenerationResponse(BaseModel):
     message: Optional[str] = Field(default=None, description="Bilgi mesajı")
     is_premium_required: bool = Field(default=False, description="Premium gerekli mi")
     premium_message: Optional[str] = Field(default=None, description="Premium mesajı")
-    blurred_names: List[int] = Field(default=[], description="Bulanık gösterilecek isim indeksleri")
+    blurred_names: List[Dict[str, Any]] = Field(default=[], description="Bulanık gösterilecek isimler")
 
 
 class ErrorResponse(BaseModel):

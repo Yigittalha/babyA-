@@ -106,20 +106,20 @@ const PremiumUpgrade = ({ onClose, onUpgrade }) => {
       try {
         // Gerçek ödeme işlemi burada olacak
         const response = await upgradeSubscription(selectedPlan.type);
-        
-        if (response.success) {
+      
+      if (response.success) {
           setCurrentStep('success');
           // 3 saniye sonra kapat ve callback çağır
           setTimeout(() => {
-            onUpgrade && onUpgrade(response);
-            onClose && onClose();
+        onUpgrade && onUpgrade(response);
+        onClose && onClose();
           }, 3000);
-        }
-      } catch (error) {
+      }
+    } catch (error) {
         console.error('Payment error:', error);
         alert('Ödeme işlemi sırasında bir hata oluştu. Lütfen tekrar deneyin.');
         setCurrentStep('payment');
-      } finally {
+    } finally {
         setProcessing(false);
       }
     }, 3000);
@@ -168,49 +168,49 @@ const PremiumUpgrade = ({ onClose, onUpgrade }) => {
         {/* Step 1: Plan Selection */}
         {currentStep === 'plans' && (
           <>
-            {/* Header */}
-            <div className="p-6 border-b border-gray-200">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <Crown className="w-8 h-8 text-purple-500 mr-3" />
+        {/* Header */}
+        <div className="p-6 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <Crown className="w-8 h-8 text-purple-500 mr-3" />
                   <h2 className="text-2xl font-bold text-gray-800">Premium'a Geçin</h2>
-                </div>
-                <button
-                  onClick={onClose}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-              
-              {currentStatus && (
-                <div className="mt-4 p-4 bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="font-semibold text-gray-800">
-                        Mevcut Durum: {currentStatus.is_premium ? 'Premium Üye' : 'Ücretsiz Üye'}
-                      </h3>
-                      <p className="text-sm text-gray-600">
-                        Premium özelliklerle isim arama deneyiminizi geliştirin
-                      </p>
-                    </div>
-                    {currentStatus.is_premium && (
-                      <div className="flex items-center text-purple-600">
-                        <Crown className="w-5 h-5 mr-2" />
-                        <span className="font-medium">Premium Aktif</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+          
+          {currentStatus && (
+            <div className="mt-4 p-4 bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold text-gray-800">
+                    Mevcut Durum: {currentStatus.is_premium ? 'Premium Üye' : 'Ücretsiz Üye'}
+                  </h3>
+                    <p className="text-sm text-gray-600">
+                        Premium özelliklerle isim arama deneyiminizi geliştirin
+                    </p>
+                </div>
+                {currentStatus.is_premium && (
+                  <div className="flex items-center text-purple-600">
+                    <Crown className="w-5 h-5 mr-2" />
+                    <span className="font-medium">Premium Aktif</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
-            {/* Plans */}
-            <div className="p-6">
+        {/* Plans */}
+        <div className="p-6">
                              <div className="grid md:grid-cols-2 gap-8 max-w-5xl mx-auto">
-                 {plans.map((plan) => (
-                   <div
-                     key={plan.id}
+            {plans.map((plan) => (
+              <div
+                key={plan.id}
                      className={`relative p-8 rounded-2xl border-2 transition-all duration-500 cursor-pointer transform hover:scale-105 hover:shadow-2xl ${
                        plan.type === 'premium_yearly'
                          ? 'border-purple-300 bg-gradient-to-br from-purple-100 via-pink-50 to-indigo-100 shadow-lg scale-[1.02] ring-2 ring-purple-200'
@@ -222,10 +222,10 @@ const PremiumUpgrade = ({ onClose, onUpgrade }) => {
                        <div className="absolute -top-4 left-1/2 transform -translate-x-1/2 z-10">
                          <span className="bg-gradient-to-r from-red-500 to-pink-500 text-white px-6 py-2 rounded-full text-sm font-bold shadow-lg animate-pulse">
                            ✨ {plan.discount}
-                         </span>
-                       </div>
-                     )}
-
+                    </span>
+                  </div>
+                )}
+                
                                          <div className="text-center mb-8">
                        <div className="mb-4">
                          <Crown className="w-12 h-12 mx-auto text-purple-500 mb-3" />
@@ -246,21 +246,21 @@ const PremiumUpgrade = ({ onClose, onUpgrade }) => {
                            <span className="text-gray-400 line-through text-base">₺{plan.originalPrice}</span>
                            <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-semibold">
                              💰 ₺{(plan.originalPrice - plan.price).toFixed(2)} tasarruf
-                           </span>
-                         </div>
-                       )}
-                     </div>
+                    </span>
+                  </div>
+                )}
+                </div>
 
                                          <div className="space-y-4 mb-8">
-                       {plan.features.map((feature, index) => (
+                  {plan.features.map((feature, index) => (
                          <div key={index} className="flex items-start group">
                            <div className="w-6 h-6 bg-gradient-to-r from-green-400 to-green-500 rounded-full flex items-center justify-center mr-3 mt-0.5 flex-shrink-0 group-hover:scale-110 transition-transform">
                              <Check className="w-3 h-3 text-white" />
                            </div>
                            <span className="text-gray-700 font-medium group-hover:text-gray-800 transition-colors">{feature}</span>
-                         </div>
-                       ))}
-                     </div>
+                    </div>
+                  ))}
+                </div>
 
                      <button
                        className={`w-full py-4 px-6 rounded-xl font-bold text-lg transition-all duration-300 transform hover:scale-105 shadow-lg hover:shadow-xl ${
@@ -572,9 +572,9 @@ const PremiumUpgrade = ({ onClose, onUpgrade }) => {
                            </div>
                          </div>
                        </div>
-                     )}
-                  </div>
-                </div>
+                )}
+              </div>
+          </div>
 
                                  {/* Order Summary */}
                  <div className="md:col-span-1">
@@ -714,8 +714,8 @@ const PremiumUpgrade = ({ onClose, onUpgrade }) => {
                  <br />
                  <span className="font-semibold text-green-600">Hoş geldiniz Premium kullanıcı!</span>
                </p>
-             </div>
-           </div>
+          </div>
+        </div>
          )}
       </div>
     </div>

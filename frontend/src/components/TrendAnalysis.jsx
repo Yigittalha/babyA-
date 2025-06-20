@@ -78,8 +78,8 @@ const TrendAnalysis = () => {
   }
 
   const filteredTrends = selectedLanguage === 'all' 
-    ? trends.trends_by_language 
-    : trends.trends_by_language.filter(t => t.language === selectedLanguage);
+    ? (trends?.trends_by_language || [])
+    : (trends?.trends_by_language || []).filter(t => t.language === selectedLanguage);
 
   return (
     <div className="bg-white rounded-2xl shadow-lg p-8">
@@ -95,7 +95,7 @@ const TrendAnalysis = () => {
             className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
           >
             <option value="all">🌍 Tüm Diller</option>
-            {trends.trends_by_language.map(lang => (
+            {(trends?.trends_by_language || []).map(lang => (
               <option key={lang.language} value={lang.language}>
                 {getLanguageLabel(lang.language)}
               </option>
@@ -105,14 +105,14 @@ const TrendAnalysis = () => {
       </div>
 
       {/* Global En Popüler İsimler */}
-      {trends.global_top_names && trends.global_top_names.length > 0 && (
+      {trends?.global_top_names && trends.global_top_names.length > 0 && (
         <div className="mb-8 bg-gradient-to-br from-purple-50 to-pink-50 p-6 rounded-xl border border-purple-100">
           <div className="flex items-center mb-4">
             <Star className="w-6 h-6 text-purple-500 mr-2" />
             <h3 className="text-lg font-semibold text-gray-800">🌍 Global En Popüler İsimler</h3>
           </div>
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {trends.global_top_names.slice(0, 9).map((trend, index) => (
+            {(trends?.global_top_names || []).slice(0, 9).map((trend, index) => (
               <div key={trend.name} className="bg-white p-4 rounded-lg border border-purple-200">
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-semibold text-gray-800">{trend.name}</span>
@@ -176,7 +176,7 @@ const TrendAnalysis = () => {
       <div className="mt-6 text-center text-sm text-gray-500">
         <Calendar className="w-4 h-4 inline mr-1" />
         Son güncelleme: {new Date().toLocaleDateString('tr-TR')} | 
-        <span className="ml-2">Toplam {trends.total_languages} dil analiz edildi</span>
+        <span className="ml-2">Toplam {trends?.total_languages || 0} dil analiz edildi</span>
       </div>
     </div>
   );

@@ -39,11 +39,12 @@ const NameResults = ({ results, onGenerateNew, loading, onAddToFavorites, user, 
     }
   }, [results, searchTerm, sortBy]);
 
-  // Sayfalama hesaplamaları
-  const totalPages = Math.ceil(filteredAndSortedResults.length / namesPerPage);
+  // Sayfalama hesaplamaları - Normal isimler ve bulanık isimleri birleştir
+  const allNames = [...filteredAndSortedResults, ...blurredNames];
+  const totalPages = Math.ceil(allNames.length / namesPerPage);
   const startIndex = (currentPage - 1) * namesPerPage;
   const endIndex = startIndex + namesPerPage;
-  const currentNames = filteredAndSortedResults.slice(startIndex, endIndex);
+  const currentNames = allNames.slice(startIndex, endIndex);
 
   const handlePageChange = (page) => {
     setCurrentPage(page);
@@ -195,8 +196,8 @@ const NameResults = ({ results, onGenerateNew, loading, onAddToFavorites, user, 
   };
 
   // Bulanık isim kontrolü
-  const isNameBlurred = (index) => {
-    return blurredNames.includes(index);
+  const isNameBlurred = (name) => {
+    return name.name === "●●●●●" || name.meaning === "🔒 Premium üyelik gerekli";
   };
 
   // Bulanık isim kartına tıklama
@@ -212,7 +213,7 @@ const NameResults = ({ results, onGenerateNew, loading, onAddToFavorites, user, 
           🎉 İsim Önerileriniz Hazır!
         </h2>
         <p className="text-gray-600 mobile-text-lg">
-          {filteredAndSortedResults.length} isim bulundu • Sayfa {currentPage} / {totalPages}
+          {allNames.length} isim bulundu • Sayfa {currentPage} / {totalPages}
         </p>
         <p className="text-gray-500 text-sm mt-2">
           Beğendiğiniz isimleri favorilere ekleyebilirsiniz • Her sayfada {namesPerPage} isim gösteriliyor
@@ -254,7 +255,7 @@ const NameResults = ({ results, onGenerateNew, loading, onAddToFavorites, user, 
         {searchTerm && (
           <div className="text-center">
             <p className="text-sm text-gray-600">
-              "{searchTerm}" için {filteredAndSortedResults.length} sonuç bulundu
+              "{searchTerm}" için {allNames.length} sonuç bulundu
             </p>
           </div>
         )}
@@ -265,15 +266,13 @@ const NameResults = ({ results, onGenerateNew, loading, onAddToFavorites, user, 
         <div className="bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-xl border border-blue-100">
           <div className="text-center">
             <div className="text-2xl font-bold text-blue-600">{filteredAndSortedResults.length}</div>
-            <div className="text-sm text-gray-600">Toplam İsim</div>
+            <div className="text-sm text-gray-600">Görünen İsim</div>
           </div>
         </div>
-        <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-4 rounded-xl border border-green-100">
+        <div className="bg-gradient-to-r from-amber-50 to-yellow-50 p-4 rounded-xl border border-amber-100">
           <div className="text-center">
-            <div className="text-2xl font-bold text-green-600">
-              {filteredAndSortedResults.filter(n => n.popularity === 'popular').length}
-            </div>
-            <div className="text-sm text-gray-600">Popüler</div>
+            <div className="text-2xl font-bold text-amber-600">{blurredNames.length}</div>
+            <div className="text-sm text-gray-600">🔒 Premium İsim</div>
           </div>
         </div>
         <div className="bg-gradient-to-r from-purple-50 to-pink-50 p-4 rounded-xl border border-purple-100">
@@ -297,7 +296,7 @@ const NameResults = ({ results, onGenerateNew, loading, onAddToFavorites, user, 
       {/* İsim Kartları */}
       <div className="mobile-grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-6">
         {currentNames.map((name, index) => {
-          const isBlurred = isNameBlurred(startIndex + index);
+          const isBlurred = isNameBlurred(name);
           
           return (
             <div

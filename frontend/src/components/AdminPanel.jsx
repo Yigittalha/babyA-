@@ -21,7 +21,7 @@ const AdminPanel = () => {
   
   // System state
   const [systemInfo, setSystemInfo] = useState(null);
-  
+
   // Analytics state
   const [favoriteAnalytics, setFavoriteAnalytics] = useState(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
@@ -234,27 +234,42 @@ const AdminPanel = () => {
     return new Date(dateString).toLocaleString('tr-TR');
   };
 
+  // Safe number formatter
+  const safeNumber = (value, fallback = 0) => {
+    const num = Number(value);
+    return isNaN(num) || !isFinite(num) ? fallback : num;
+  };
+
+  // Safe percentage formatter
+  const safePercentage = (value, fallback = 0) => {
+    const num = Number(value);
+    return isNaN(num) || !isFinite(num) ? fallback : Math.round(num * 100) / 100;
+  };
+
   // Statistics Card Component
-  const StatCard = ({ title, value, icon, color, trend, trendValue }) => (
-    <div className={`bg-gradient-to-br ${color} rounded-2xl p-6 text-white shadow-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-300`}>
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium opacity-90">{title}</p>
-          <p className="text-3xl font-bold mt-2">{value?.toLocaleString() || '0'}</p>
-          {trend && (
-            <div className="flex items-center mt-2">
-              <span className={`text-xs px-2 py-1 rounded-full ${trend === 'up' ? 'bg-green-500' : 'bg-red-500'} bg-opacity-20`}>
-                {trend === 'up' ? '↗' : '↘'} {trendValue}
-              </span>
-            </div>
-          )}
-        </div>
-        <div className="text-4xl opacity-80">
-          {icon}
+  const StatCard = ({ title, value, icon, color, trend, trendValue }) => {
+    const safeValue = safeNumber(value, 0);
+    return (
+      <div className={`bg-gradient-to-br ${color} rounded-2xl p-6 text-white shadow-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-300`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium opacity-90">{title}</p>
+            <p className="text-3xl font-bold mt-2">{safeValue.toLocaleString()}</p>
+            {trend && (
+              <div className="flex items-center mt-2">
+                <span className={`text-xs px-2 py-1 rounded-full ${trend === 'up' ? 'bg-green-500' : 'bg-red-500'} bg-opacity-20`}>
+                  {trend === 'up' ? '↗' : '↘'} {trendValue || '0%'}
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="text-4xl opacity-80">
+            {icon}
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // Loading Component
   const LoadingSpinner = () => (
@@ -277,7 +292,7 @@ const AdminPanel = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header */}
+          {/* Header */}
         <div className="mb-8">
           <div className="flex items-center justify-between">
             <div>
@@ -291,7 +306,7 @@ const AdminPanel = () => {
               </div>
             </div>
           </div>
-        </div>
+          </div>
 
         {/* Navigation Tabs */}
         <div className="mb-8">
@@ -301,25 +316,25 @@ const AdminPanel = () => {
               { id: 'users', name: 'Kullanıcılar', icon: '👥' },
               { id: 'analytics', name: 'Favori Analitik', icon: '❤️📈' },
               { id: 'system', name: 'Sistem', icon: '⚙️' }
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => handleTabChange(tab.id)}
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => handleTabChange(tab.id)}
                 className={`flex items-center space-x-2 px-6 py-3 rounded-xl font-semibold text-sm transition-all duration-300 ${
-                  activeTab === tab.id
+                    activeTab === tab.id
                     ? 'bg-white text-indigo-600 shadow-lg transform scale-105'
                     : 'text-gray-600 hover:text-gray-900 hover:bg-white hover:bg-opacity-50'
-                }`}
-              >
+                  }`}
+                >
                 <span>{tab.icon}</span>
                 <span>{tab.name}</span>
-              </button>
-            ))}
+                </button>
+              ))}
           </div>
-        </div>
+          </div>
 
-        {/* Error Display */}
-        {error && (
+          {/* Error Display */}
+          {error && (
           <div className="mb-6 bg-red-50 border-l-4 border-red-500 rounded-xl p-4 shadow-lg">
             <div className="flex items-center">
               <div className="text-red-500 text-xl mr-3">⚠️</div>
@@ -328,23 +343,23 @@ const AdminPanel = () => {
                 <p className="text-red-700">{error}</p>
               </div>
             </div>
-          </div>
-        )}
+              </div>
+            )}
 
         {/* Content Container */}
         <div className="bg-white rounded-3xl shadow-xl overflow-hidden">
           {loading && <LoadingSpinner />}
 
-          {/* Stats Tab */}
+            {/* Stats Tab */}
           {activeTab === 'stats' && !loading && (
             <div className="p-8">
               {stats ? (
                 <div className="space-y-8">
                   {/* Main Stats Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     <StatCard
                       title="Toplam Kullanıcı"
-                      value={stats.user_count}
+                      value={safeNumber(stats.user_count)}
                       icon="👥"
                       color="from-blue-500 to-blue-600"
                       trend="up"
@@ -352,7 +367,7 @@ const AdminPanel = () => {
                     />
                     <StatCard
                       title="Aktif Favoriler"
-                      value={stats.favorite_count}
+                      value={safeNumber(stats.favorite_count)}
                       icon="❤️"
                       color="from-pink-500 to-red-500"
                       trend="up"
@@ -360,7 +375,7 @@ const AdminPanel = () => {
                     />
                     <StatCard
                       title="Yeni Üyeler (24s)"
-                      value={stats.recent_registrations}
+                      value={safeNumber(stats.recent_registrations)}
                       icon="🆕"
                       color="from-green-500 to-emerald-500"
                       trend="up"
@@ -368,7 +383,7 @@ const AdminPanel = () => {
                     />
                     <StatCard
                       title="Sistem Sağlığı"
-                      value={stats.system_status?.database === 'healthy' ? '100%' : '0%'}
+                      value={stats.system_status?.database === 'healthy' ? 100 : 0}
                       icon={stats.system_status?.database === 'healthy' ? '✅' : '❌'}
                       color="from-purple-500 to-indigo-500"
                     />
@@ -383,18 +398,18 @@ const AdminPanel = () => {
                       <div className="space-y-4">
                         <div className="flex justify-between items-center">
                           <span className="text-gray-600">Toplam İsim Üretimi</span>
-                          <span className="font-bold text-gray-900">{(stats.user_count * 15).toLocaleString()}</span>
-                        </div>
+                          <span className="font-bold text-gray-900">{safeNumber(safeNumber(stats.user_count) * 15).toLocaleString()}</span>
+                </div>
                         <div className="flex justify-between items-center">
                           <span className="text-gray-600">Ortalama Favori/Kullanıcı</span>
-                          <span className="font-bold text-gray-900">{stats.user_count > 0 ? Math.round(stats.favorite_count / stats.user_count) : 0}</span>
-                        </div>
+                          <span className="font-bold text-gray-900">{safeNumber(stats.user_count) > 0 ? safeNumber(Math.round(safeNumber(stats.favorite_count) / safeNumber(stats.user_count))) : 0}</span>
+                    </div>
                         <div className="flex justify-between items-center">
                           <span className="text-gray-600">Günlük Aktif Kullanıcı</span>
-                          <span className="font-bold text-gray-900">{Math.floor(stats.user_count * 0.15)}</span>
-                        </div>
-                      </div>
+                          <span className="font-bold text-gray-900">{safeNumber(Math.floor(safeNumber(stats.user_count) * 0.15))}</span>
                     </div>
+                  </div>
+                </div>
 
                     <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-2xl p-6">
                       <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
@@ -404,26 +419,26 @@ const AdminPanel = () => {
                         <div className="flex justify-between items-center">
                           <span className="text-gray-600">API Yanıt Süresi</span>
                           <span className="font-bold text-green-600">~180ms</span>
-                        </div>
+                    </div>
                         <div className="flex justify-between items-center">
                           <span className="text-gray-600">Sistem Kullanılabilirlik</span>
                           <span className="font-bold text-green-600">99.9%</span>
-                        </div>
+                    </div>
                         <div className="flex justify-between items-center">
                           <span className="text-gray-600">Hata Oranı</span>
                           <span className="font-bold text-green-600">0.1%</span>
-                        </div>
-                      </div>
+                  </div>
+                </div>
                     </div>
                   </div>
                 </div>
               ) : (
                 <EmptyState message="İstatistikler yükleniyor..." icon="📊" />
               )}
-            </div>
-          )}
+              </div>
+            )}
 
-          {/* Users Tab */}
+            {/* Users Tab */}
           {activeTab === 'users' && !loading && (
             <div className="p-8">
               <div className="flex justify-between items-center mb-6">
@@ -437,8 +452,8 @@ const AdminPanel = () => {
               
               {users.length > 0 ? (
                 <div className="overflow-hidden rounded-2xl border border-gray-200">
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
                         <tr>
                           <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">👤 Kullanıcı</th>
@@ -446,8 +461,8 @@ const AdminPanel = () => {
                           <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">📅 Kayıt Tarihi</th>
                           <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">💎 Abonelik</th>
                           <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">⚡ İşlemler</th>
-                        </tr>
-                      </thead>
+                      </tr>
+                    </thead>
                       <tbody className="bg-white divide-y divide-gray-100">
                         {users.map((user, index) => (
                           <tr key={user.id} className={`hover:bg-gray-50 transition-colors duration-200 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-25'}`}>
@@ -462,18 +477,18 @@ const AdminPanel = () => {
                                 </div>
                               </div>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{user.email}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(user.created_at)}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{user.email}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(user.created_at)}</td>
                             <td className="px-6 py-4 whitespace-nowrap">
                               <span className={`px-3 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                                user.subscription_type === 'premium' 
+                              user.subscription_type === 'premium' 
                                   ? 'bg-gradient-to-r from-yellow-100 to-yellow-200 text-yellow-800' 
                                   : 'bg-gradient-to-r from-gray-100 to-gray-200 text-gray-800'
-                              }`}>
+                            }`}>
                                 {user.subscription_type === 'premium' ? '💎 Premium' : '🆓 Ücretsiz'}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                               <div className="flex space-x-2">
                                 <button
                                   onClick={() => toggleUserSubscription(user.id, user.subscription_type)}
@@ -485,50 +500,50 @@ const AdminPanel = () => {
                                 >
                                   {user.subscription_type === 'premium' ? '⬇️ Premium İptal' : '⬆️ Premium Ver'}
                                 </button>
-                                <button
-                                  onClick={() => deleteUser(user.id)}
+                            <button
+                              onClick={() => deleteUser(user.id)}
                                   className="bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1 rounded-lg text-xs font-semibold transition-colors duration-200"
-                                >
+                            >
                                   🗑️ Sil
-                                </button>
+                            </button>
                               </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  
-                  {/* Pagination */}
-                  {usersTotal > 20 && (
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                
+                {/* Pagination */}
+                {usersTotal > 20 && (
                     <div className="bg-gray-50 px-6 py-4 flex items-center justify-between border-t border-gray-200">
                       <div className="text-sm text-gray-600">
-                        Sayfa {usersPage} / {Math.ceil(usersTotal / 20)} - Toplam {usersTotal.toLocaleString()} kayıt
+                        Sayfa {safeNumber(usersPage, 1)} / {safeNumber(Math.ceil(safeNumber(usersTotal) / 20), 1)} - Toplam {safeNumber(usersTotal).toLocaleString()} kayıt
                       </div>
                       <div className="flex space-x-2">
-                        <button
-                          onClick={() => loadUsers(usersPage - 1)}
-                          disabled={usersPage === 1}
+                    <button
+                          onClick={() => loadUsers(safeNumber(usersPage, 1) - 1)}
+                          disabled={safeNumber(usersPage, 1) === 1}
                           className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
                         >
                           ← Önceki
-                        </button>
-                        <button
-                          onClick={() => loadUsers(usersPage + 1)}
-                          disabled={usersPage >= Math.ceil(usersTotal / 20)}
+                    </button>
+                    <button
+                          onClick={() => loadUsers(safeNumber(usersPage, 1) + 1)}
+                          disabled={safeNumber(usersPage, 1) >= safeNumber(Math.ceil(safeNumber(usersTotal) / 20), 1)}
                           className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
                         >
                           Sonraki →
-                        </button>
-                      </div>
+                    </button>
+                  </div>
                     </div>
                   )}
                 </div>
               ) : (
                 <EmptyState message="Henüz kullanıcı bulunmuyor" icon="👥" />
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
 
 
 
@@ -541,10 +556,10 @@ const AdminPanel = () => {
                 </h2>
                 <div className="flex items-center space-x-4">
                   <div className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-lg">
-                    <span className="font-semibold">Toplam:</span> {favoritesTotal?.toLocaleString() || 0} favori
-                  </div>
+                    <span className="font-semibold">Toplam:</span> {safeNumber(favoritesTotal).toLocaleString()} favori
+                </div>
                   <div className="text-sm text-green-600 bg-green-100 px-3 py-1 rounded-lg">
-                    <span className="font-semibold">Aktif:</span> {favoriteAnalytics?.totalFavorites || 0}
+                    <span className="font-semibold">Aktif:</span> {safeNumber(favoriteAnalytics?.totalFavorites)}
                   </div>
                 </div>
               </div>
@@ -557,9 +572,9 @@ const AdminPanel = () => {
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-2xl border border-blue-200">
                       <div className="flex items-center justify-between">
-                        <div>
+                    <div>
                           <p className="text-blue-600 font-semibold">Toplam Favori</p>
-                          <p className="text-3xl font-bold text-blue-900">{favoriteAnalytics.totalFavorites}</p>
+                          <p className="text-3xl font-bold text-blue-900">{safeNumber(favoriteAnalytics.totalFavorites)}</p>
                         </div>
                         <div className="text-blue-500 text-3xl">📊</div>
                       </div>
@@ -567,9 +582,9 @@ const AdminPanel = () => {
                     
                     <div className="bg-gradient-to-br from-pink-50 to-pink-100 p-6 rounded-2xl border border-pink-200">
                       <div className="flex items-center justify-between">
-                        <div>
+                    <div>
                           <p className="text-pink-600 font-semibold">Benzersiz İsim</p>
-                          <p className="text-3xl font-bold text-pink-900">{favoriteAnalytics.popularNames.length * 4}</p>
+                          <p className="text-3xl font-bold text-pink-900">{safeNumber(favoriteAnalytics.popularNames?.length) * 4}</p>
                         </div>
                         <div className="text-pink-500 text-3xl">🏷️</div>
                       </div>
@@ -577,10 +592,10 @@ const AdminPanel = () => {
                     
                     <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-2xl border border-purple-200">
                       <div className="flex items-center justify-between">
-                        <div>
+                    <div>
                           <p className="text-purple-600 font-semibold">En Popüler</p>
-                          <p className="text-xl font-bold text-purple-900">{favoriteAnalytics.popularNames[0]?.name}</p>
-                          <p className="text-sm text-purple-700">{favoriteAnalytics.popularNames[0]?.count} kez</p>
+                          <p className="text-xl font-bold text-purple-900">{favoriteAnalytics.popularNames?.[0]?.name || 'Henüz yok'}</p>
+                          <p className="text-sm text-purple-700">{safeNumber(favoriteAnalytics.popularNames?.[0]?.count)} kez</p>
                         </div>
                         <div className="text-purple-500 text-3xl">👑</div>
                       </div>
@@ -588,7 +603,7 @@ const AdminPanel = () => {
                     
                     <div className="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-2xl border border-green-200">
                       <div className="flex items-center justify-between">
-                        <div>
+                    <div>
                           <p className="text-green-600 font-semibold">Ortalama/Kullanıcı</p>
                           <p className="text-3xl font-bold text-green-900">4.2</p>
                         </div>
@@ -621,8 +636,8 @@ const AdminPanel = () => {
                                 <span className="font-semibold text-gray-900">{item.name}</span>
                               </div>
                               <div className="text-right">
-                                <div className="font-bold text-gray-900">{item.count}</div>
-                                <div className="text-xs text-gray-500">%{item.percentage}</div>
+                                <div className="font-bold text-gray-900">{safeNumber(item.count)}</div>
+                                <div className="text-xs text-gray-500">%{safePercentage(item.percentage)}</div>
                               </div>
                             </div>
                           ))}
@@ -643,12 +658,12 @@ const AdminPanel = () => {
                             <span className="text-blue-600 font-semibold flex items-center">
                               <span className="mr-2">👦</span> Erkek
                             </span>
-                            <span className="font-bold text-blue-900">%{favoriteAnalytics.genderDistribution.male}</span>
+                            <span className="font-bold text-blue-900">%{safePercentage(favoriteAnalytics.genderDistribution.male)}</span>
                           </div>
                           <div className="w-full bg-gray-200 rounded-full h-3">
                             <div 
                               className="bg-blue-500 h-3 rounded-full transition-all duration-500"
-                              style={{ width: `${favoriteAnalytics.genderDistribution.male}%` }}
+                              style={{ width: `${safePercentage(favoriteAnalytics.genderDistribution.male)}%` }}
                             ></div>
                           </div>
                           
@@ -656,12 +671,12 @@ const AdminPanel = () => {
                             <span className="text-pink-600 font-semibold flex items-center">
                               <span className="mr-2">👧</span> Kız
                             </span>
-                            <span className="font-bold text-pink-900">%{favoriteAnalytics.genderDistribution.female}</span>
+                            <span className="font-bold text-pink-900">%{safePercentage(favoriteAnalytics.genderDistribution.female)}</span>
                           </div>
                           <div className="w-full bg-gray-200 rounded-full h-3">
                             <div 
                               className="bg-pink-500 h-3 rounded-full transition-all duration-500"
-                              style={{ width: `${favoriteAnalytics.genderDistribution.female}%` }}
+                              style={{ width: `${safePercentage(favoriteAnalytics.genderDistribution.female)}%` }}
                             ></div>
                           </div>
                         </div>
@@ -689,12 +704,12 @@ const AdminPanel = () => {
                               </span>
                               <div className="flex items-center space-x-2">
                                 <div className="w-20 bg-gray-200 rounded-full h-2">
-                                  <div 
-                                    className="bg-green-500 h-2 rounded-full transition-all duration-500"
-                                    style={{ width: `${percentage}%` }}
-                                  ></div>
-                                </div>
-                                <span className="font-bold text-gray-900 text-sm">%{percentage}</span>
+                                                                  <div 
+                                  className="bg-green-500 h-2 rounded-full transition-all duration-500"
+                                  style={{ width: `${safePercentage(percentage)}%` }}
+                                ></div>
+                              </div>
+                              <span className="font-bold text-gray-900 text-sm">%{safePercentage(percentage)}</span>
                               </div>
                             </div>
                           ))}
@@ -721,12 +736,12 @@ const AdminPanel = () => {
                               </span>
                               <div className="flex items-center space-x-2">
                                 <div className="w-20 bg-gray-200 rounded-full h-2">
-                                  <div 
-                                    className="bg-purple-500 h-2 rounded-full transition-all duration-500"
-                                    style={{ width: `${percentage * 3}%` }}
-                                  ></div>
-                                </div>
-                                <span className="font-bold text-gray-900 text-sm">%{percentage}</span>
+                                                                  <div 
+                                  className="bg-purple-500 h-2 rounded-full transition-all duration-500"
+                                  style={{ width: `${safePercentage(percentage) * 3}%` }}
+                                ></div>
+                              </div>
+                              <span className="font-bold text-gray-900 text-sm">%{safePercentage(percentage)}</span>
                               </div>
                             </div>
                           ))}
@@ -770,11 +785,11 @@ const AdminPanel = () => {
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                             <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-xl">
                               <div className="text-blue-600 font-semibold text-sm">Bugün Eklenen</div>
-                              <div className="text-2xl font-bold text-blue-900">{Math.floor(Math.random() * 5) + 1}</div>
+                              <div className="text-2xl font-bold text-blue-900">{safeNumber(Math.floor(Math.random() * 5) + 1)}</div>
                             </div>
                             <div className="bg-gradient-to-br from-green-50 to-green-100 p-4 rounded-xl">
                               <div className="text-green-600 font-semibold text-sm">Bu Hafta</div>
-                              <div className="text-2xl font-bold text-green-900">{Math.floor(Math.random() * 15) + 5}</div>
+                              <div className="text-2xl font-bold text-green-900">{safeNumber(Math.floor(Math.random() * 15) + 5)}</div>
                             </div>
                             <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-4 rounded-xl">
                               <div className="text-purple-600 font-semibold text-sm">En Aktif Kullanıcı</div>
@@ -790,8 +805,8 @@ const AdminPanel = () => {
                                 <div className="flex items-center space-x-3">
                                   <div className="w-8 h-8 bg-gradient-to-br from-pink-400 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-xs">
                                     {favorite.name?.charAt(0)?.toUpperCase() || '?'}
-                                  </div>
-                                  <div>
+                    </div>
+                    <div>
                                     <div className="font-semibold text-gray-900">{favorite.name}</div>
                                     <div className="text-xs text-gray-500">
                                       {favorite.user_email} • {favorite.language || 'Türkçe'} • {favorite.theme || 'Klasik'}
@@ -817,8 +832,8 @@ const AdminPanel = () => {
                           {/* Management Actions */}
                           <div className="mt-6 flex items-center justify-between p-4 bg-gray-50 rounded-xl">
                             <div className="text-sm text-gray-600">
-                              <span className="font-semibold">Toplam:</span> {favoritesTotal} favori • 
-                              <span className="font-semibold ml-2">Sayfa:</span> {favoritesPage}/{Math.ceil(favoritesTotal / 20)}
+                              <span className="font-semibold">Toplam:</span> {safeNumber(favoritesTotal)} favori • 
+                              <span className="font-semibold ml-2">Sayfa:</span> {safeNumber(favoritesPage, 1)}/{safeNumber(Math.ceil(safeNumber(favoritesTotal) / 20), 1)}
                             </div>
                             <div className="flex space-x-2">
                               <button
@@ -862,8 +877,8 @@ const AdminPanel = () => {
                   <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
                   <span className="text-green-600 font-semibold">Sistem Çalışıyor</span>
                 </div>
-              </div>
-              
+                </div>
+
               {systemInfo ? (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                   {/* System Information */}
@@ -887,7 +902,7 @@ const AdminPanel = () => {
                       <div className="flex justify-between items-center py-2 border-b border-blue-100">
                         <span className="text-gray-600 font-medium">CPU Çekirdek</span>
                         <span className="font-bold text-gray-900 bg-white px-3 py-1 rounded-lg">
-                          {systemInfo.system?.cpu_count || 'Unknown'} Çekirdek
+                          {safeNumber(systemInfo.system?.cpu_count) || 'Unknown'} Çekirdek
                         </span>
                       </div>
                       <div className="flex justify-between items-center py-2 border-b border-blue-100">
@@ -908,11 +923,11 @@ const AdminPanel = () => {
                           <div className="w-20 bg-gray-200 rounded-full h-2">
                             <div 
                               className="bg-gradient-to-r from-green-400 to-blue-500 h-2 rounded-full transition-all duration-300"
-                              style={{ width: `${systemInfo.system?.disk_usage || 0}%` }}
+                              style={{ width: `${safePercentage(systemInfo.system?.disk_usage)}%` }}
                             ></div>
                           </div>
                           <span className="font-bold text-gray-900 bg-white px-3 py-1 rounded-lg text-sm">
-                            {systemInfo.system?.disk_usage || 0}%
+                            {safePercentage(systemInfo.system?.disk_usage)}%
                           </span>
                         </div>
                       </div>
@@ -940,7 +955,7 @@ const AdminPanel = () => {
                         }`}>
                           {systemInfo.application?.database_connected ? '✅ Bağlı' : '❌ Bağlantı Yok'}
                         </span>
-                      </div>
+                    </div>
                       <div className="flex justify-between items-center py-2 border-b border-green-100">
                         <span className="text-gray-600 font-medium">AI Servisi</span>
                         <span className={`px-3 py-1 rounded-lg font-semibold text-sm ${
@@ -955,7 +970,7 @@ const AdminPanel = () => {
                         <span className="text-gray-600 font-medium">Çalışma Süresi</span>
                         <span className="font-bold text-gray-900 bg-white px-3 py-1 rounded-lg">
                           {systemInfo.application?.uptime ? 
-                            `${Math.floor(systemInfo.application.uptime / 3600)}s ${Math.floor((systemInfo.application.uptime % 3600) / 60)}d` 
+                            `${safeNumber(Math.floor(safeNumber(systemInfo.application.uptime) / 3600))}s ${safeNumber(Math.floor((safeNumber(systemInfo.application.uptime) % 3600) / 60))}d` 
                             : 'Unknown'
                           }
                         </span>
@@ -1002,8 +1017,8 @@ const AdminPanel = () => {
               ) : (
                 <EmptyState message="Sistem bilgileri yükleniyor..." icon="⚙️" />
               )}
-            </div>
-          )}
+              </div>
+            )}
         </div>
       </div>
     </div>

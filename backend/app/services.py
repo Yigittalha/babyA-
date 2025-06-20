@@ -1,1079 +1,685 @@
 """
-AI servisleri ve iş mantığı
+Professional service layer with business logic, caching, and error handling
 """
-
-import os
-import asyncio
 import json
-import hashlib
-import logging
-from typing import List, Dict, Any, Optional
-from openai import AsyncOpenAI
-from .models import NameGenerationRequest, NameSuggestion
-from .utils import logger, sanitize_input, validate_api_key
-from datetime import datetime
+import asyncio
+from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional, Tuple
+from sqlalchemy.orm import Session
+from sqlalchemy import func, desc, and_, or_
+import openai
+import structlog
 
-# Basit in-memory cache
-_cache = {}
+from .config import settings
+from .cache import redis_manager, CacheKeys, generate_cache_key, cached_function
+from .database_models import (
+    User, UserFavorite, NameGeneration, PopularName, 
+    SubscriptionPlan, AuditLog, UserSubscriptionStatus
+)
+from .models import (
+    NameGenerationRequest, NameGenerationResponse, NameSuggestion,
+    UserRegistration, FavoriteNameCreate
+)
+from .auth import get_password_hash, verify_password
+from .logging_config import app_logger, audit_logger, performance_monitor
 
-def sanitize_input(text: str) -> str:
-    """Input sanitization"""
-    if not text:
-        return ""
-    # HTML tag'lerini temizle
-    import re
-    text = re.sub(r'<[^>]+>', '', text)
-    # Özel karakterleri temizle
-    text = re.sub(r'[^\w\s\-.,!?]', '', text)
-    return text.strip()
-
-def validate_api_key(api_key: str) -> bool:
-    """API key formatını kontrol et"""
-    if not api_key or len(api_key) < 10:
-        return False
-    return True
-
-class AIService:
-    """AI servis sınıfı - OpenAI ve OpenRouter API'ler için"""
-    
-    def __init__(self):
-        self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
-        self.openrouter_api_key = os.getenv("OPENROUTER_API_KEY", "")
-        self.openrouter_base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-        self.client = None
-        self._initialize_client()
-    
-    def _initialize_client(self):
-        """AI client'ını başlat - OpenRouter öncelikli"""
-        # OpenRouter API key varsa onu kullan
-        if self.openrouter_api_key and self.openrouter_api_key != "YOUR_OPENROUTER_API_KEY_HERE":
-            try:
-                self.client = AsyncOpenAI(
-                    api_key=self.openrouter_api_key,
-                    base_url=self.openrouter_base_url
-                )
-                logger.info("OpenRouter client initialized successfully")
-                return
-            except Exception as e:
-                logger.error(f"Failed to initialize OpenRouter client: {e}")
-        
-        # Fallback olarak OpenAI kullan
-        if self.openai_api_key and self.openai_api_key != "YOUR_OPENAI_API_KEY_HERE":
-            if not validate_api_key(self.openai_api_key):
-                logger.error("Invalid OpenAI API key format")
-                return
-            
-            try:
-                self.client = AsyncOpenAI(api_key=self.openai_api_key)
-                logger.info("OpenAI client initialized successfully")
-                return
-            except Exception as e:
-                logger.error(f"Failed to initialize OpenAI client: {e}")
-        
-        logger.error("No valid API key found")
-    
-    def _get_cache_key(self, prompt: str) -> str:
-        """Cache key oluştur"""
-        return hashlib.md5(prompt.encode()).hexdigest()
-    
-    def _get_from_cache(self, key: str) -> Optional[str]:
-        """Cache'den veri al"""
-        if key in _cache:
-            cached_data = _cache[key]
-            # Cache 1 saat geçerli
-            if cached_data.get('timestamp', 0) + 3600 > asyncio.get_event_loop().time():
-                return cached_data.get('data')
-        return None
-    
-    def _set_cache(self, key: str, data: str):
-        """Cache'e veri kaydet"""
-        _cache[key] = {
-            'data': data,
-            'timestamp': asyncio.get_event_loop().time()
-        }
-        # Cache boyutunu kontrol et (max 100 item)
-        if len(_cache) > 100:
-            oldest_key = min(_cache.keys(), key=lambda k: _cache[k].get('timestamp', 0))
-            del _cache[oldest_key]
-    
-    async def generate_names_openai(self, request: NameGenerationRequest) -> List[NameSuggestion]:
-        """AI ile isim üret (OpenAI veya OpenRouter)"""
-        if not self.client:
-            raise Exception("AI client not initialized")
-        
-        # Prompt oluştur
-        prompt = self._create_prompt(request)
-        
-        # Cache kontrolü
-        cache_key = self._get_cache_key(prompt)
-        cached_result = self._get_from_cache(cache_key)
-        if cached_result:
-            logger.info("Using cached name generation result")
-            suggestions = self._parse_ai_response(cached_result, request)
-            return suggestions
-        
-        try:
-            logger.info(f"Generating names for gender: {request.gender}, language: {request.language}, theme: {request.theme}")
-            
-            # OpenRouter için model seçimi
-            model = "openai/gpt-3.5-turbo" if self.openrouter_api_key and self.openrouter_api_key != "YOUR_OPENROUTER_API_KEY_HERE" else "gpt-3.5-turbo"
-            
-            response = await self.client.chat.completions.create(
-                model=model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "Sen profesyonel bir bebek ismi uzmanısın. Verilen kriterlere göre anlamlı, güzel ve kültürel olarak uygun bebek isimleri önerirsin."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                max_tokens=3000,
-                temperature=0.7,
-                timeout=30
-            )
-            
-            # Yanıtı parse et
-            content = response.choices[0].message.content
-            
-            # Cache'e kaydet
-            self._set_cache(cache_key, content)
-            
-            suggestions = self._parse_ai_response(content, request)
-            
-            logger.info(f"Generated {len(suggestions)} name suggestions")
-            return suggestions
-            
-        except Exception as e:
-            logger.error(f"AI API error: {e}")
-            raise Exception(f"AI service error: {str(e)}")
-    
-    def _create_prompt(self, request: NameGenerationRequest) -> str:
-        """AI için prompt oluştur"""
-        gender_map = {
-            "male": "erkek",
-            "female": "kız", 
-            "unisex": "unisex"
-        }
-        
-        language_map = {
-            "turkish": "Türkçe",
-            "english": "İngilizce",
-            "arabic": "Arapça",
-            "persian": "Farsça",
-            "kurdish": "Kürtçe",
-            "azerbaijani": "Azerbaycan dili"
-        }
-        
-        theme_map = {
-            "nature": "doğa ile ilgili",
-            "religious": "dini/ilahi",
-            "historical": "tarihi",
-            "modern": "modern",
-            "traditional": "geleneksel",
-            "unique": "benzersiz",
-            "royal": "asil/kraliyet",
-            "warrior": "savaşçı",
-            "wisdom": "bilgelik",
-            "love": "aşk/sevgi"
-        }
-        
-        gender_text = gender_map.get(request.gender, request.gender)
-        language_text = language_map.get(request.language, request.language)
-        theme_text = theme_map.get(request.theme, request.theme)
-        
-        prompt = f"""
-        Lütfen aşağıdaki kriterlere uygun 40-50 bebek ismi öner:
-
-        Cinsiyet: {gender_text}
-        Dil: {language_text}
-        Tema: {theme_text}
-        
-        Ekstra bilgiler: {request.extra or "Yok"}
-        
-        Her isim için şu formatta yanıt ver:
-        İsim - Anlamı ve açıklaması
-        
-        Örnek format:
-        Ahmet - Cesur, güçlü, övülmüş
-        Zeynep - Güzel, değerli taş
-        
-        Lütfen çeşitli, modern ve anlamlı isimler öner. Klasik isimlerin yanında daha az bilinen ama güzel isimler de dahil et. Farklı kategorilerde isimler ver (klasik, modern, nadir, popüler, geleneksel, çağdaş, uluslararası).
-        """
-        
-        return prompt.strip()
-    
-    def _parse_ai_response(self, content: str, request: NameGenerationRequest = None) -> List[NameSuggestion]:
-        """AI yanıtını parse et"""
-        suggestions = []
-        
-        lines = content.strip().split('\n')
-        
-        for line in lines:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            
-            # İsim ve anlamı ayır
-            if ' - ' in line:
-                name_part, meaning_part = line.split(' - ', 1)
-                name = name_part.strip()
-                meaning = meaning_part.strip()
-                
-                if name and meaning:
-                    suggestion = NameSuggestion(
-                        name=name,
-                        meaning=meaning,
-                        origin="AI Generated",
-                        popularity="Modern"
-                    )
-                    
-                    # Request bilgilerini ekle
-                    if request:
-                        suggestion.gender = request.gender
-                        suggestion.language = request.language
-                        suggestion.theme = request.theme
-                    
-                    suggestions.append(suggestion)
-        
-        return suggestions[:15]  # Maksimum 15 öneri
-    
-    async def generate_names_fallback(self, request: NameGenerationRequest) -> List[NameSuggestion]:
-        """Fallback isim üretimi - AI çalışmazsa"""
-        logger.warning("Using fallback name generation")
-        
-        # Genişletilmiş fallback isimler
-        fallback_names = {
-            "male": {
-                "turkish": {
-                    "nature": [
-                        ("Deniz", "Okyanus, deniz"),
-                        ("Rüzgar", "Hava akımı"),
-                        ("Dağ", "Yüksek tepe"),
-                        ("Orman", "Ağaç topluluğu"),
-                        ("Güneş", "Güneş ışığı"),
-                        ("Yıldız", "Gökyüzündeki parlak cisim"),
-                        ("Nehir", "Akan su"),
-                        ("Çiçek", "Güzel bitki"),
-                        ("Kuş", "Uçan hayvan"),
-                        ("Ağaç", "Uzun boylu bitki")
-                    ],
-                    "religious": [
-                        ("Ahmet", "Cesur, güçlü, övülmüş"),
-                        ("Mehmet", "Övülmüş, beğenilmiş"),
-                        ("Ali", "Yüce, yüksek"),
-                        ("Hasan", "Güzel, iyi"),
-                        ("Hüseyin", "Güzel, iyi"),
-                        ("İbrahim", "Baba olan"),
-                        ("Yusuf", "Güzel yüzlü"),
-                        ("Musa", "Su çocuğu"),
-                        ("İsa", "Kurtarıcı"),
-                        ("Davut", "Sevilen")
-                    ],
-                    "modern": [
-                        ("Arda", "Orman, ağaç"),
-                        ("Ege", "Ege denizi"),
-                        ("Can", "Yaşam, ruh"),
-                        ("Kaan", "Hükümdar"),
-                        ("Alp", "Kahraman"),
-                        ("Berk", "Güçlü, sağlam"),
-                        ("Eren", "Ermiş, veli"),
-                        ("Mert", "Yiğit, cesur"),
-                        ("Ozan", "Şair"),
-                        ("Taha", "Kur'an harfi")
-                    ],
-                    "persian": {
-                        "nature": [
-                            ("Ramin", "Yüksek, yüce"),
-                            ("Soroush", "Melek, ilahi haberci"),
-                            ("Shahin", "Şahin, yırtıcı kuş"),
-                            ("Kourosh", "Güneş, parlak"),
-                            ("Arash", "Kahraman okçu"),
-                            ("Siavash", "Siyah at"),
-                            ("Rostam", "Güçlü, kahraman"),
-                            ("Bahram", "Zafer, galibiyet"),
-                            ("Dariush", "İyi kral"),
-                            ("Cyrus", "Güneş, taht")
-                        ],
-                        "royal": [
-                            ("Shahriar", "Kral, hükümdar"),
-                            ("Ardeshir", "Haklı kral"),
-                            ("Khosrow", "İyi ün"),
-                            ("Jamshid", "Güneş kralı"),
-                            ("Fereydun", "Üç katlı güç"),
-                            ("Keyvan", "Satürn gezegeni"),
-                            ("Sohrab", "Parlak yüz"),
-                            ("Esfandiar", "Kutsal ateş"),
-                            ("Garshasp", "Güçlü at"),
-                            ("Zal", "Beyaz saçlı")
-                        ],
-                        "wisdom": [
-                            ("Hafez", "Koruyucu, hafız"),
-                            ("Saadi", "Mutlu, şanslı"),
-                            ("Rumi", "Roma'dan gelen"),
-                            ("Omar", "Uzun ömürlü"),
-                            ("Ferdowsi", "Cennet bahçesi"),
-                            ("Nezami", "Şiir, nazım"),
-                            ("Attar", "Eczacı, şifacı"),
-                            ("Jami", "Toplayıcı"),
-                            ("Khaqani", "Hükümdar"),
-                            ("Sanai", "Yüksek yer")
-                        ]
-                    }
-                },
-                "english": {
-                    "nature": [
-                        ("River", "Nehir"),
-                        ("Forest", "Orman"),
-                        ("Sky", "Gökyüzü"),
-                        ("Ocean", "Okyanus"),
-                        ("Mountain", "Dağ"),
-                        ("Storm", "Fırtına"),
-                        ("Rain", "Yağmur"),
-                        ("Sun", "Güneş"),
-                        ("Moon", "Ay"),
-                        ("Star", "Yıldız")
-                    ],
-                    "modern": [
-                        ("Liam", "Güçlü irade"),
-                        ("Noah", "Huzur"),
-                        ("Oliver", "Zeytin ağacı"),
-                        ("Elijah", "Tanrım"),
-                        ("William", "İstekli koruyucu"),
-                        ("James", "Takipçi"),
-                        ("Benjamin", "Sağ el oğlu"),
-                        ("Lucas", "Işık"),
-                        ("Mason", "Taş ustası"),
-                        ("Ethan", "Güçlü")
-                    ]
-                }
-            },
-            "female": {
-                "turkish": {
-                    "nature": [
-                        ("Deniz", "Okyanus, deniz"),
-                        ("Rüzgar", "Hava akımı"),
-                        ("Dağ", "Yüksek tepe"),
-                        ("Orman", "Ağaç topluluğu"),
-                        ("Güneş", "Güneş ışığı"),
-                        ("Yıldız", "Gökyüzündeki parlak cisim"),
-                        ("Nehir", "Akan su"),
-                        ("Çiçek", "Güzel bitki"),
-                        ("Kuş", "Uçan hayvan"),
-                        ("Ağaç", "Uzun boylu bitki")
-                    ],
-                    "religious": [
-                        ("Fatma", "Sütten kesilmiş"),
-                        ("Ayşe", "Yaşayan, canlı"),
-                        ("Zeynep", "Güzel, değerli taş"),
-                        ("Hatice", "Erken doğan"),
-                        ("Meryem", "Deniz damlası"),
-                        ("Havva", "Yaşam veren"),
-                        ("Reyhan", "Fesleğen"),
-                        ("Safiye", "Temiz, saf"),
-                        ("Ümmü", "Anne"),
-                        ("Esma", "İsimler")
-                    ],
-                    "modern": [
-                        ("Elif", "Alfabenin ilk harfi"),
-                        ("Defne", "Defne ağacı"),
-                        ("Mira", "Mira yıldızı"),
-                        ("Ada", "Ada"),
-                        ("Ece", "Kraliçe"),
-                        ("Selin", "Sel, su"),
-                        ("Büşra", "Müjde"),
-                        ("Zara", "Altın"),
-                        ("Leyla", "Gece"),
-                        ("Maya", "Su perisi")
-                    ],
-                    "persian": {
-                        "nature": [
-                            ("Shirin", "Tatlı, güzel"),
-                            ("Parisa", "Peri yüzü"),
-                            ("Anahita", "Su tanrıçası"),
-                            ("Roxana", "Parlak, ışıltılı"),
-                            ("Yasmin", "Yasemin çiçeği"),
-                            ("Azar", "Ateş"),
-                            ("Mehr", "Güneş, sevgi"),
-                            ("Nahid", "Venüs gezegeni"),
-                            ("Tara", "Yıldız"),
-                            ("Saba", "Sabah rüzgarı")
-                        ],
-                        "royal": [
-                            ("Shahrazad", "Şehir kraliçesi"),
-                            ("Donya", "Dünya"),
-                            ("Pari", "Peri"),
-                            ("Banu", "Hanım, kadın"),
-                            ("Shahin", "Şahin"),
-                            ("Malek", "Kraliçe"),
-                            ("Sultan", "Hükümdar"),
-                            ("Shahla", "Koyu gözlü"),
-                            ("Shahzad", "Prenses"),
-                            ("Shahinaz", "Gururlu kraliçe")
-                        ],
-                        "love": [
-                            ("Mahnaz", "Gurur, onur"),
-                            ("Minoo", "Cennet"),
-                            ("Mojgan", "Kirpik"),
-                            ("Nazanin", "Nazlı, şirin"),
-                            ("Neda", "Ses, çağrı"),
-                            ("Negin", "Mücevher"),
-                            ("Niloofar", "Nilüfer"),
-                            ("Pantea", "Güçlü, güçlü"),
-                            ("Raha", "Özgür"),
-                            ("Roya", "Rüya")
-                        ]
-                    }
-                },
-                "english": {
-                    "nature": [
-                        ("Willow", "Söğüt"),
-                        ("Rose", "Gül"),
-                        ("Daisy", "Papatya"),
-                        ("Iris", "Süsen"),
-                        ("Lily", "Zambak"),
-                        ("Violet", "Menekşe"),
-                        ("Jasmine", "Yasemin"),
-                        ("Lavender", "Lavanta"),
-                        ("Sage", "Adaçayı"),
-                        ("Autumn", "Sonbahar")
-                    ],
-                    "modern": [
-                        ("Emma", "Evrensel"),
-                        ("Olivia", "Zeytin ağacı"),
-                        ("Ava", "Kuş"),
-                        ("Isabella", "Tanrıma yemin"),
-                        ("Sophia", "Bilgelik"),
-                        ("Charlotte", "Küçük"),
-                        ("Mia", "Benim"),
-                        ("Amelia", "Çalışkan"),
-                        ("Harper", "Arp çalan"),
-                        ("Evelyn", "İstenen")
-                    ]
-                }
-            }
-        }
-        
-        # İlgili kategoriden isimleri al
-        gender_names = fallback_names.get(request.gender, {})
-        language_names = gender_names.get(request.language, {})
-        theme_names = language_names.get(request.theme, [])
-        
-        # Eğer tema için özel isim yoksa, genel isimlerden al
-        if not theme_names:
-            theme_names = []
-            for theme_names_list in language_names.values():
-                theme_names.extend(theme_names_list)
-        
-        # Eğer hala isim yoksa, varsayılan isimler
-        if not theme_names:
-            default_names = {
-                "male": [("Ahmet", "Cesur, güçlü"), ("Mehmet", "Övülmüş"), ("Ali", "Yüce")],
-                "female": [("Zeynep", "Güzel"), ("Fatma", "Sütten kesilmiş"), ("Ayşe", "Yaşayan")]
-            }
-            theme_names = default_names.get(request.gender, [])
-        
-        suggestions = []
-        for name, meaning in theme_names[:12]:  # Maksimum 12 isim
-            suggestion = NameSuggestion(
-                name=name,
-                meaning=meaning,
-                origin="Fallback",
-                popularity="Traditional"
-            )
-            
-            # Request bilgilerini ekle
-            suggestion.gender = request.gender
-            suggestion.language = request.language
-            suggestion.theme = request.theme
-            
-            suggestions.append(suggestion)
-        
-        return suggestions
-
-    async def generate_text(self, prompt: str, max_tokens: int = 1000) -> str:
-        """Generate text using AI service"""
-        try:
-            if self.client:
-                # Model seçimi
-                model = "openai/gpt-3.5-turbo" if self.openrouter_api_key and self.openrouter_api_key != "YOUR_OPENROUTER_API_KEY_HERE" else "gpt-3.5-turbo"
-                
-                response = await self.client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=max_tokens,
-                    temperature=0.7
-                )
-                return response.choices[0].message.content.strip()
-            else:
-                return "AI servisi şu anda kullanılamıyor."
-        except Exception as e:
-            logger.error(f"AI text generation error: {e}")
-            return "AI servisi hatası oluştu."
-
-    async def get_name_suggestions_by_theme(self, theme: str, gender: str, count: int = 10) -> List[Dict]:
-        """Tema bazlı isim önerileri"""
-        prompt = f"""
-        {theme} temasında {gender} bebek isimleri öner. {count} isim ver.
-        
-        Her isim için şu formatta yanıt ver:
-        İsim - Anlamı
-        
-        Örnek:
-        Deniz - Okyanus, deniz
-        Rüzgar - Hava akımı
-        
-        Sadece isim ve anlam ver, başka açıklama yapma.
-        """
-        
-        try:
-            response = await self.generate_text(prompt, max_tokens=2000)
-            return self._parse_theme_response(response, gender, None, theme)
-        except Exception as e:
-            logger.error(f"Theme-based name generation error: {e}")
-            return []
-
-    def _parse_theme_response(self, content: str, gender: str = None, language: str = None, theme: str = None) -> List[Dict]:
-        """Tema bazlı AI yanıtını parse et"""
-        try:
-            import json
-            # JSON bloğunu bul
-            start_idx = content.find('{')
-            end_idx = content.rfind('}')
-            
-            if start_idx != -1 and end_idx != -1:
-                json_str = content[start_idx:end_idx + 1]
-                data = json.loads(json_str)
-                
-                # Eğer data bir liste ise direkt döndür
-                if isinstance(data, list):
-                    # Gender, language ve theme bilgilerini ekle
-                    for item in data:
-                        if gender:
-                            item['gender'] = gender
-                        if language:
-                            item['language'] = language
-                        if theme:
-                            item['theme'] = theme
-                    return data
-                
-                # Eğer data bir dict ise ve names key'i varsa
-                if isinstance(data, dict) and 'names' in data:
-                    names = data['names']
-                    # Gender, language ve theme bilgilerini ekle
-                    for item in names:
-                        if gender:
-                            item['gender'] = gender
-                        if language:
-                            item['language'] = language
-                        if theme:
-                            item['theme'] = theme
-                    return names
-                
-                # Diğer durumlar için boş liste döndür
-                return []
-            else:
-                # JSON bulunamadı, manuel parse et
-                lines = content.strip().split('\n')
-                names = []
-                
-                for line in lines:
-                    line = line.strip()
-                    if ' - ' in line:
-                        name_part, meaning_part = line.split(' - ', 1)
-                        name = name_part.strip()
-                        meaning = meaning_part.strip()
-                        
-                        if name and meaning:
-                            name_obj = {
-                                "name": name,
-                                "meaning": meaning,
-                                "origin": "AI Generated",
-                                "popularity": "Modern"
-                            }
-                            
-                            # Gender, language ve theme bilgilerini ekle
-                            if gender:
-                                name_obj['gender'] = gender
-                            if language:
-                                name_obj['language'] = language
-                            if theme:
-                                name_obj['theme'] = theme
-                            
-                            names.append(name_obj)
-                
-                return names
-                
-        except Exception as e:
-            logger.error(f"Theme response parsing error: {e}")
-            return []
-
-    async def get_name_compatibility(self, name1: str, name2: str) -> Dict:
-        """İki ismin uyumluluğunu analiz et"""
-        prompt = f"""
-        "{name1}" ve "{name2}" isimlerinin uyumluluğunu analiz et:
-        - Ses uyumu
-        - Anlam uyumu
-        - Kültürel uyum
-        - Modern uyum
-        - Genel puan (1-10)
-        
-        Türkçe olarak detaylı analiz yap.
-        """
-        
-        try:
-            response = await self.generate_text(prompt, max_tokens=1000)
-            return {
-                "name1": name1,
-                "name2": name2,
-                "analysis": response,
-                "compatibility_score": 8  # Placeholder
-            }
-        except Exception as e:
-            logger.error(f"Name compatibility analysis error: {e}")
-            return {"error": "Uyumluluk analizi yapılamadı"}
-
-    async def get_name_trends(self) -> Dict:
-        """Güncel isim trendlerini getir"""
-        try:
-            prompt = """
-            Güncel bebek ismi trendlerini analiz et ve şu formatta JSON yanıt ver:
-            
-            {
-                "global_trends": [
-                    {
-                        "name": "İsim",
-                        "language": "Dil",
-                        "gender": "Cinsiyet",
-                        "trend_score": 0.85,
-                        "popularity_change": "Yükselen",
-                        "meaning": "Anlamı",
-                        "origin": "Kökeni",
-                        "cultural_context": "Kültürel bağlamı"
-                    }
-                ],
-                "trends_by_language": {
-                    "turkish": [
-                        {
-                            "name": "Türkçe İsim",
-                            "gender": "erkek/kız",
-                            "trend_score": 0.9,
-                            "popularity_change": "Yükselen",
-                            "meaning": "Anlamı",
-                            "origin": "Kökeni",
-                            "cultural_context": "Kültürel bağlamı"
-                        }
-                    ],
-                    "english": [
-                        {
-                            "name": "English Name",
-                            "gender": "male/female",
-                            "trend_score": 0.8,
-                            "popularity_change": "Stabil",
-                            "meaning": "Meaning",
-                            "origin": "Origin",
-                            "cultural_context": "Cultural context"
-                        }
-                    ]
-                },
-                "analysis": "Genel trend analizi"
-            }
-            
-            Sadece JSON formatında yanıt ver, başka açıklama ekleme.
-            """
-            
-            response = await self.generate_text(prompt, max_tokens=2000)
-            
-            # JSON parse et
-            try:
-                trends_data = json.loads(response)
-                return trends_data
-            except json.JSONDecodeError:
-                logger.error("Failed to parse trends JSON")
-                return {"error": "Trend verisi parse edilemedi"}
-                
-        except Exception as e:
-            logger.error(f"Get name trends error: {e}")
-            return {"error": "Trend analizi yapılamadı"}
-
-    async def get_global_trends(self) -> Dict:
-        """Çoklu dil desteği ile global trendler"""
-        try:
-            languages = ["turkish", "english", "arabic", "persian", "french", "german", "spanish"]
-            all_trends = {}
-            
-            for language in languages:
-                prompt = f"""
-                {language.capitalize()} dilindeki güncel bebek ismi trendlerini analiz et.
-                En popüler 10 ismi şu formatta JSON olarak ver:
-                
-                {{
-                    "language": "{language}",
-                    "language_name": "{self._get_language_name(language)}",
-                    "trends": [
-                        {{
-                            "name": "İsim",
-                            "gender": "cinsiyet",
-                            "trend_score": 0.85,
-                            "popularity_change": "Yükselen/Stabil/Düşen",
-                            "meaning": "Anlamı",
-                            "origin": "Kökeni",
-                            "cultural_context": "Kültürel bağlamı"
-                        }}
-                    ]
-                }}
-                
-                Sadece JSON formatında yanıt ver.
-                """
-                
-                try:
-                    response = await self.generate_text(prompt, max_tokens=1500)
-                    trends_data = json.loads(response)
-                    all_trends[language] = trends_data
-                except Exception as e:
-                    logger.error(f"Failed to get trends for {language}: {e}")
-                    continue
-            
-            # Global en popüler isimleri belirle
-            global_prompt = """
-            Tüm dillerdeki trend verilerini analiz ederek global olarak en popüler 15 bebek ismini belirle.
-            Şu formatta JSON yanıt ver:
-            
-            {
-                "global_top_names": [
-                    {
-                        "name": "İsim",
-                        "language": "Dil",
-                        "gender": "Cinsiyet",
-                        "trend_score": 0.95,
-                        "popularity_change": "Global Yükselen",
-                        "meaning": "Anlamı",
-                        "origin": "Kökeni",
-                        "cultural_context": "Global kültürel bağlamı"
-                    }
-                ]
-            }
-            """
-            
-            try:
-                global_response = await self.generate_text(global_prompt, max_tokens=1000)
-                global_data = json.loads(global_response)
-                all_trends["global"] = global_data
-            except Exception as e:
-                logger.error(f"Failed to get global trends: {e}")
-            
-            return {
-                "success": True,
-                "trends_by_language": list(all_trends.values()),
-                "global_top_names": all_trends.get("global", {}).get("global_top_names", []),
-                "last_updated": datetime.now().isoformat(),
-                "total_languages": len(all_trends)
-            }
-            
-        except Exception as e:
-            logger.error(f"Get global trends error: {e}")
-            return {"success": False, "error": "Global trend analizi yapılamadı"}
-
-    def _get_language_name(self, language_code: str) -> str:
-        """Dil kodunu dil adına çevir"""
-        language_names = {
-            "turkish": "Türkçe",
-            "english": "İngilizce",
-            "arabic": "Arapça",
-            "persian": "Farsça",
-            "kurdish": "Kürtçe",
-            "azerbaijani": "Azerbaycan dili",
-            "french": "Fransızca",
-            "german": "Almanca",
-            "spanish": "İspanyolca",
-            "portuguese": "Portekizce",
-            "russian": "Rusça",
-            "chinese": "Çince",
-            "japanese": "Japonca"
-        }
-        return language_names.get(language_code, language_code.capitalize())
-
-    async def get_premium_name_suggestions(self, request: NameGenerationRequest, is_premium: bool = False) -> Dict:
-        """Premium kullanıcılar için gelişmiş isim önerileri"""
-        try:
-            # Temel isim üretimi
-            basic_names = await self.generate_names_openai(request)
-            
-            # Premium özellikler
-            premium_features = {}
-            
-            if is_premium:
-                # Detaylı analiz
-                detailed_analysis = await self._get_detailed_name_analysis(basic_names[:5])
-                premium_features["detailed_analysis"] = detailed_analysis
-                
-                # Kültürel bağlam
-                cultural_context = await self._get_cultural_context(request)
-                premium_features["cultural_context"] = cultural_context
-                
-                # Popülerlik tahmini
-                popularity_prediction = await self._get_popularity_prediction(basic_names[:5])
-                premium_features["popularity_prediction"] = popularity_prediction
-                
-                # Benzer isimler
-                similar_names = await self._get_similar_names(basic_names[:3])
-                premium_features["similar_names"] = similar_names
-            
-            return {
-                "success": True,
-                "names": [name.dict() for name in basic_names],
-                "total_count": len(basic_names),
-                "is_premium_required": not is_premium and len(basic_names) > 5,
-                "premium_message": "Premium üye olarak daha fazla özellik ve analiz alın!" if not is_premium else None,
-                "premium_features": premium_features if is_premium else None
-            }
-            
-        except Exception as e:
-            logger.error(f"Premium name suggestions error: {e}")
-            return {"success": False, "error": "İsim önerileri oluşturulamadı"}
-
-    async def _get_detailed_name_analysis(self, names: List[NameSuggestion]) -> List[Dict]:
-        """İsimler için detaylı analiz"""
-        try:
-            analysis_results = []
-            
-            for name in names:
-                prompt = f"""
-                "{name.name}" ismi için detaylı analiz yap:
-                
-                1. Etimolojik köken
-                2. Tarihsel kullanım
-                3. Kültürel anlamı
-                4. Modern algısı
-                5. Uluslararası kullanımı
-                6. Varyasyonları
-                7. Ünlü kişiler
-                8. Öneriler
-                
-                JSON formatında yanıt ver.
-                """
-                
-                response = await self.generate_text(prompt, max_tokens=800)
-                try:
-                    analysis = json.loads(response)
-                    analysis["name"] = name.name
-                    analysis_results.append(analysis)
-                except json.JSONDecodeError:
-                    continue
-            
-            return analysis_results
-            
-        except Exception as e:
-            logger.error(f"Detailed analysis error: {e}")
-            return []
-
-    async def _get_cultural_context(self, request: NameGenerationRequest) -> Dict:
-        """Kültürel bağlam analizi"""
-        try:
-            prompt = f"""
-            {request.language} dilinde {request.gender} bebek isimleri için kültürel bağlam analizi yap:
-            
-            1. Tarihsel gelişim
-            2. Sosyal etkiler
-            3. Dini faktörler
-            4. Modern eğilimler
-            5. Uluslararası etkiler
-            
-            JSON formatında yanıt ver.
-            """
-            
-            response = await self.generate_text(prompt, max_tokens=600)
-            return json.loads(response)
-            
-        except Exception as e:
-            logger.error(f"Cultural context error: {e}")
-            return {}
-
-    async def _get_popularity_prediction(self, names: List[NameSuggestion]) -> List[Dict]:
-        """Popülerlik tahmini"""
-        try:
-            predictions = []
-            
-            for name in names:
-                prompt = f"""
-                "{name.name}" isminin gelecek 5 yıldaki popülerlik trendini tahmin et:
-                
-                1. Mevcut durum
-                2. Gelecek trendi
-                3. Faktörler
-                4. Öneriler
-                
-                JSON formatında yanıt ver.
-                """
-                
-                response = await self.generate_text(prompt, max_tokens=400)
-                try:
-                    prediction = json.loads(response)
-                    prediction["name"] = name.name
-                    predictions.append(prediction)
-                except json.JSONDecodeError:
-                    continue
-            
-            return predictions
-            
-        except Exception as e:
-            logger.error(f"Popularity prediction error: {e}")
-            return []
-
-    async def _get_similar_names(self, names: List[NameSuggestion]) -> List[Dict]:
-        """Benzer isimler"""
-        try:
-            similar_names = []
-            
-            for name in names:
-                prompt = f"""
-                "{name.name}" ismine benzer 5 isim öner:
-                
-                Her isim için:
-                - İsim
-                - Benzerlik oranı
-                - Benzerlik nedeni
-                
-                JSON formatında yanıt ver.
-                """
-                
-                response = await self.generate_text(prompt, max_tokens=300)
-                try:
-                    similar = json.loads(response)
-                    similar["original_name"] = name.name
-                    similar_names.append(similar)
-                except json.JSONDecodeError:
-                    continue
-            
-            return similar_names
-            
-        except Exception as e:
-            logger.error(f"Similar names error: {e}")
-            return []
+logger = structlog.get_logger(__name__)
 
 
 class NameGenerationService:
-    """İsim üretimi ana servis sınıfı"""
+    """AI-powered name generation service with caching and analytics"""
     
     def __init__(self):
-        self.ai_service = AIService()
+        self.client = None
+        self._is_initialized = False
     
-    async def generate_names(self, request: NameGenerationRequest) -> List[NameSuggestion]:
-        """İsim üretimi ana metodu"""
+    @classmethod
+    def initialize(cls):
+        """Initialize the AI client"""
         try:
-            # Input sanitization
-            if request.extra:
-                request.extra = sanitize_input(request.extra)
+            # Initialize OpenRouter client
+            openai.api_key = settings.OPENROUTER_API_KEY
+            openai.api_base = settings.OPENROUTER_BASE_URL
             
-            # AI ile isim üret
-            try:
-                suggestions = await self.ai_service.generate_names_openai(request)
-                if suggestions:
-                    return suggestions
+            cls._is_initialized = True
+            logger.info("NameGenerationService initialized successfully")
+            
             except Exception as e:
-                logger.warning(f"AI service failed, using fallback: {e}")
+            logger.error("Failed to initialize NameGenerationService", error=str(e))
+            cls._is_initialized = False
+    
+    @classmethod
+    def is_healthy(cls) -> bool:
+        """Check if service is healthy"""
+        return cls._is_initialized and bool(settings.OPENROUTER_API_KEY)
+    
+    @classmethod
+    async def generate_names(
+        cls, 
+        request_data: NameGenerationRequest, 
+        user: User, 
+        db: Session
+    ) -> NameGenerationResponse:
+        """Generate names using AI with caching and user limits"""
+        
+        start_time = datetime.utcnow()
+        
+        try:
+            # Check user limits
+            if not await cls._check_user_limits(user, db):
+                return NameGenerationResponse(
+                    success=False,
+                    names=[],
+                    total_count=0,
+                    is_premium_required=True,
+                    premium_message="Upgrade to premium for unlimited name generation"
+                )
             
-            # Fallback kullan
-            return await self.ai_service.generate_names_fallback(request)
+            # Generate cache key
+            cache_key = generate_cache_key(
+                CacheKeys.NAME_SUGGESTIONS,
+                theme=request_data.theme,
+                gender=request_data.gender,
+                culture=request_data.language
+            )
+            
+            # Try to get from cache first
+            cached_names = await redis_manager.get(cache_key)
+            if cached_names and settings.ENABLE_CACHING:
+                logger.info("Using cached names", user_id=user.id, cache_key=cache_key)
+                
+                # Apply user-specific filtering
+                filtered_names = await cls._apply_user_preferences(cached_names, user)
+                
+                # Record usage
+                await cls._record_generation(request_data, user, db, len(filtered_names), True)
+                
+                return NameGenerationResponse(
+                    success=True,
+                    names=filtered_names[:10],  # Limit to 10 names
+                    total_count=len(filtered_names),
+                    message="Names generated successfully (cached)"
+                )
+            
+            # Generate new names using AI
+            ai_response = await cls._generate_with_ai(request_data, user)
+            
+            if not ai_response:
+                return NameGenerationResponse(
+                    success=False,
+                    names=[],
+                    total_count=0,
+                    message="Failed to generate names. Please try again."
+                )
+            
+            # Parse and validate names
+            names = await cls._parse_ai_response(ai_response, request_data)
+            
+            # Cache the results
+            if settings.ENABLE_CACHING:
+                await redis_manager.set(cache_key, names, expire=timedelta(hours=6))
+            
+            # Apply user-specific filtering
+            filtered_names = await cls._apply_user_preferences(names, user)
+            
+            # Record generation
+            response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+            await cls._record_generation(request_data, user, db, len(filtered_names), True, response_time)
+            
+            # Update popular names
+            await cls._update_popular_names(filtered_names, db)
+            
+            return NameGenerationResponse(
+                success=True,
+                names=filtered_names[:10],
+                total_count=len(filtered_names),
+                message="Names generated successfully"
+            )
             
         except Exception as e:
-            logger.error(f"Name generation failed: {e}")
-            raise Exception(f"Name generation service error: {str(e)}")
-    
-    async def validate_request(self, request: NameGenerationRequest) -> bool:
-        """İstek validasyonu"""
-        if not request.gender or not request.language or not request.theme:
-            return False
-        
-        if request.extra and len(request.extra) > 500:
-            return False
-        
-        return True
-    
-    async def analyze_name(self, name: str, language: str = "turkish") -> dict:
-        """İsmin detaylı analizini yap"""
-        try:
-            # AI ile detaylı analiz
-            prompt = f"""
-            \"{name}\" isminin detaylı analizini TÜRKÇE olarak yap. Aşağıdaki bilgileri TÜRKÇE olarak ver:
-
-            1. **Köken ve Etimoloji**: İsmin kökeni, hangi dilden geldiği, tarihsel geçmişi
-            2. **Anlam ve Yorumlama**: İsmin tam anlamı, farklı yorumları
-            3. **Kültürel Bağlam**: Hangi kültürlerde kullanıldığı, kültürel önemi
-            4. **Karakteristik Özellikler**: Bu ismi taşıyan kişilerin genel karakteristik özellikleri
-            5. **Popülerlik ve Kullanım**: Günümüzdeki popülerliği, hangi ülkelerde yaygın
-            6. **Varyasyonlar**: İsmin farklı dillerdeki versiyonları
-            7. **Tarihi Figürler**: Bu ismi taşıyan ünlü tarihi kişiler
-            8. **Modern Kullanım**: Günümüzde nasıl algılandığı, modern çağrışımları
-            9. **Telaffuz**: Doğru telaffuz şekli
-            10. **Öneriler**: Bu ismi kullanırken dikkat edilmesi gerekenler
-
-            ÖNEMLİ: Tüm yanıtı TÜRKÇE olarak ver. Yanıtı JSON formatında ver:
-            {{
-                "origin": "Köken bilgisi (Türkçe)",
-                "meaning": "Detaylı anlam (Türkçe)",
-                "cultural_context": "Kültürel bağlam (Türkçe)",
-                "characteristics": "Karakteristik özellikler (Türkçe)",
-                "popularity": "Popülerlik durumu (Türkçe)",
-                "variations": ["Varyasyon 1", "Varyasyon 2"],
-                "famous_people": ["Ünlü kişi 1", "Ünlü kişi 2"],
-                "modern_perception": "Modern algı (Türkçe)",
-                "pronunciation": "Telaffuz (Türkçe)",
-                "recommendations": "Öneriler (Türkçe)"
-            }}
-            """
-
-            response = await self.ai_service.generate_text(prompt)
-            logger.info(f"AI analyze_name yanıtı: {response}")
+            logger.error("Name generation failed", user_id=user.id, error=str(e))
             
-            # JSON parse etmeye çalış
-            try:
-                import json
-                response_clean = response.strip()
-                start_idx = response_clean.find('{')
-                end_idx = response_clean.rfind('}')
-                if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                    json_str = response_clean[start_idx:end_idx + 1]
-                    analysis = json.loads(json_str)
+            # Record failed generation
+            response_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+            await cls._record_generation(request_data, user, db, 0, False, response_time, str(e))
+            
+            return NameGenerationResponse(
+                success=False,
+                names=[],
+                total_count=0,
+                message="Name generation failed. Please try again later."
+            )
+    
+    @classmethod
+    async def _check_user_limits(cls, user: User, db: Session) -> bool:
+        """Check if user can generate more names"""
+        
+        # Admin users have no limits
+        if user.is_admin:
+            return True
+        
+        # Premium users have higher limits
+        if user.is_premium_active():
+            daily_limit = 100
+        else:
+            daily_limit = 10
+        
+        # Check daily usage
+        today = datetime.utcnow().date()
+        daily_count = db.query(NameGeneration).filter(
+            and_(
+                NameGeneration.user_id == user.id,
+                func.date(NameGeneration.created_at) == today,
+                NameGeneration.was_successful == True
+            )
+        ).count()
+        
+        return daily_count < daily_limit
+    
+    @classmethod
+    async def _generate_with_ai(cls, request_data: NameGenerationRequest, user: User) -> Optional[str]:
+        """Generate names using AI service"""
+        
+        try:
+            # Build the prompt
+            prompt = cls._build_prompt(request_data, user)
+            
+            # Call AI service
+            response = await asyncio.to_thread(
+                openai.ChatCompletion.create,
+                model=settings.OPENROUTER_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a professional baby name consultant with expertise in multicultural names."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=1000,
+                temperature=0.7
+            )
+            
+            return response.choices[0].message.content
+            
+        except Exception as e:
+            logger.error("AI generation failed", error=str(e))
+            return None
+    
+    @classmethod
+    def _build_prompt(cls, request_data: NameGenerationRequest, user: User) -> str:
+        """Build AI prompt based on request"""
+        
+        prompt = f"""
+        Generate 10 beautiful {request_data.gender} baby names with the following criteria:
+        
+        - Language/Culture: {request_data.language}
+        - Theme: {request_data.theme}
+        - Gender: {request_data.gender}
+        """
+        
+        if request_data.extra:
+            prompt += f"\n- Additional requirements: {request_data.extra}"
+        
+        prompt += """
+        
+        For each name, provide:
+        1. The name itself
+        2. Meaning and significance
+        3. Cultural origin
+        4. Popularity level (rare/common/trending)
+        
+        Format as JSON array:
+        [
+            {
+                "name": "Example Name",
+                "meaning": "Beautiful meaning description",
+                "origin": "Cultural origin",
+                "popularity": "common",
+                "gender": "female",
+                "language": "turkish",
+                "theme": "nature"
+            }
+        ]
+        """
+        
+        return prompt
+    
+    @classmethod
+    async def _parse_ai_response(cls, response: str, request_data: NameGenerationRequest) -> List[NameSuggestion]:
+        """Parse AI response into structured data"""
+        
+        try:
+            # Try to extract JSON from response
+            import re
+            json_match = re.search(r'\[.*\]', response, re.DOTALL)
+            if not json_match:
+                raise ValueError("No JSON array found in response")
+            
+            json_str = json_match.group(0)
+            names_data = json.loads(json_str)
+            
+            # Convert to NameSuggestion objects
+            names = []
+            for name_data in names_data:
+                try:
+                    name_suggestion = NameSuggestion(
+                        name=name_data.get("name", ""),
+                        meaning=name_data.get("meaning", ""),
+                        origin=name_data.get("origin", ""),
+                        popularity=name_data.get("popularity", "common"),
+                        gender=request_data.gender,
+                        language=request_data.language,
+                        theme=request_data.theme
+                    )
+                    names.append(name_suggestion)
+        except Exception as e:
+                    logger.warning("Failed to parse name entry", error=str(e), data=name_data)
+                    continue
+            
+            return names
+            
+        except Exception as e:
+            logger.error("Failed to parse AI response", error=str(e))
+            return []
+
+    @classmethod
+    async def _apply_user_preferences(cls, names: List[NameSuggestion], user: User) -> List[NameSuggestion]:
+        """Apply user-specific preferences and filtering"""
+        
+        # For now, just return as-is
+        # In the future, could filter based on user preferences, favorites, etc.
+                    return names
+                
+    @classmethod
+    async def _record_generation(
+        cls, 
+        request_data: NameGenerationRequest, 
+        user: User, 
+        db: Session,
+        names_count: int,
+        success: bool,
+        response_time: float = 0,
+        error_message: Optional[str] = None
+    ):
+        """Record name generation for analytics"""
+        
+        try:
+            generation = NameGeneration(
+                user_id=user.id,
+                gender=request_data.gender,
+                language=request_data.language,
+                theme=request_data.theme,
+                extra_requirements=request_data.extra,
+                names_generated=names_count,
+                response_time_ms=int(response_time),
+                was_successful=success,
+                error_message=error_message,
+                ai_model_used=settings.OPENROUTER_MODEL
+            )
+            
+            db.add(generation)
+            db.commit()
+            
+            # Update user statistics
+            if success:
+                user.total_name_generations += 1
+                user.last_activity = datetime.utcnow()
+                db.commit()
+                
+        except Exception as e:
+            logger.error("Failed to record generation", error=str(e))
+    
+    @classmethod
+    async def _update_popular_names(cls, names: List[NameSuggestion], db: Session):
+        """Update popular names statistics"""
+        
+        try:
+            for name in names:
+                # Find or create popular name entry
+                popular_name = db.query(PopularName).filter(
+                    and_(
+                        PopularName.name == name.name,
+                        PopularName.gender == name.gender,
+                        PopularName.language == name.language
+                    )
+                ).first()
+                
+                if popular_name:
+                    popular_name.generation_count += 1
+                    popular_name.updated_at = datetime.utcnow()
                 else:
-                    analysis = json.loads(response_clean)
-                required_fields = ["origin", "meaning", "cultural_context", "characteristics", 
-                                 "popularity", "variations", "famous_people", "modern_perception", 
-                                 "pronunciation", "recommendations"]
-                for field in required_fields:
-                    if field not in analysis:
-                        analysis[field] = f"{field} bilgisi mevcut değil"
-                return analysis
-            except Exception as e:
-                logger.warning(f"JSON parsing failed for name analysis: {e}, yanıt: {response}")
-                # JSON parse edilemezse, response'u anlamlı parçalara böl
-                lines = response.split('\n')
-                analysis = {
-                    "origin": f"{name} isminin kökeni analiz edilemedi",
-                    "meaning": f"{name} isminin anlamı: {response[:200]}..." if len(response) > 200 else response,
-                    "cultural_context": "Kültürel bağlam analiz edilemedi",
-                    "characteristics": "Karakteristik özellikler analiz edilemedi",
-                    "popularity": "Popülerlik durumu analiz edilemedi",
-                    "variations": [],
-                    "famous_people": [],
-                    "modern_perception": "Modern algı analiz edilemedi",
-                    "pronunciation": "Telaffuz analiz edilemedi",
-                    "recommendations": "Öneriler analiz edilemedi"
-                }
-                return analysis
+                    popular_name = PopularName(
+                        name=name.name,
+                        meaning=name.meaning,
+                        origin=name.origin,
+                        gender=name.gender,
+                        language=name.language,
+                        theme=name.theme,
+                        popularity_score=1.0,
+                        trend_direction="stable",
+                        generation_count=1
+                    )
+                    db.add(popular_name)
+            
+            db.commit()
+            
         except Exception as e:
-            logger.error(f"Name analysis failed: {e}")
+            logger.error("Failed to update popular names", error=str(e))
+    
+    @classmethod
+    async def get_popular_names(cls, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get popular names for cache warming"""
+        
+        try:
+            # This would query the database for popular names
+            # For now, return empty list
+            return []
+                
+        except Exception as e:
+            logger.error("Failed to get popular names", error=str(e))
+            return []
+
+
+class UserService:
+    """User management service with authentication and profile management"""
+    
+    @staticmethod
+    async def create_user(user_data: UserRegistration, db: Session) -> User:
+        """Create a new user account"""
+        
+        try:
+            # Check if user already exists
+            existing_user = db.query(User).filter(User.email == user_data.email).first()
+            if existing_user:
+                raise ValueError("Email already registered")
+            
+            # Create new user
+            hashed_password = get_password_hash(user_data.password)
+            
+            user = User(
+                email=user_data.email,
+                password_hash=hashed_password,
+                name=user_data.name,
+                is_active=True,
+                subscription_status=UserSubscriptionStatus.FREE
+            )
+            
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            
+            logger.info("User created successfully", user_id=user.id, email=user.email)
+            return user
+            
+        except Exception as e:
+            db.rollback()
+            logger.error("User creation failed", error=str(e))
+            raise
+    
+    @staticmethod
+    async def authenticate_user(email: str, password: str, db: Session) -> Optional[User]:
+        """Authenticate user with email and password"""
+        
+        try:
+            user = db.query(User).filter(User.email == email).first()
+            
+            if not user:
+                return None
+            
+            if user.is_account_locked():
+                logger.warning("Login attempt on locked account", user_id=user.id)
+                return None
+            
+            if not verify_password(password, user.password_hash):
+                # Increment failed attempts
+                user.failed_login_attempts += 1
+                user.last_login_attempt = datetime.utcnow()
+                
+                # Lock account after 5 failed attempts
+                if user.failed_login_attempts >= 5:
+                    user.account_locked_until = datetime.utcnow() + timedelta(minutes=30)
+                    logger.warning("Account locked due to failed attempts", user_id=user.id)
+                
+                db.commit()
+                return None
+            
+            # Reset failed attempts on successful login
+            user.failed_login_attempts = 0
+            user.last_login_attempt = datetime.utcnow()
+            user.last_activity = datetime.utcnow()
+            user.account_locked_until = None
+            db.commit()
+            
+            logger.info("User authenticated successfully", user_id=user.id)
+            return user
+            
+        except Exception as e:
+            logger.error("Authentication failed", error=str(e))
+            return None
+    
+    @staticmethod
+    async def get_total_users() -> int:
+        """Get total number of users"""
+        # This would query the database
+        return 0
+    
+    @staticmethod
+    async def list_users(skip: int, limit: int, db: Session) -> List[Dict[str, Any]]:
+        """List users with pagination"""
+        
+        try:
+            users = db.query(User).offset(skip).limit(limit).all()
+            
+            return [
+                {
+                    "id": user.id,
+                    "email": user.email,
+                    "name": user.name,
+                    "is_active": user.is_active,
+                    "subscription_status": user.subscription_status.value,
+                    "created_at": user.created_at.isoformat(),
+                    "last_activity": user.last_activity.isoformat()
+                }
+                for user in users
+            ]
+            
+        except Exception as e:
+            logger.error("Failed to list users", error=str(e))
+            return []
+
+
+class AnalyticsService:
+    """Analytics and reporting service"""
+    
+    @classmethod
+    def initialize(cls):
+        """Initialize analytics service"""
+        logger.info("AnalyticsService initialized")
+    
+    @classmethod
+    async def start_collection(cls):
+        """Start background analytics collection"""
+        try:
+            while True:
+                await cls._collect_metrics()
+                await asyncio.sleep(3600)  # Collect every hour
+                
+        except asyncio.CancelledError:
+            logger.info("Analytics collection stopped")
+        except Exception as e:
+            logger.error("Analytics collection failed", error=str(e))
+    
+    @classmethod
+    async def _collect_metrics(cls):
+        """Collect system metrics"""
+        try:
+            # Collect Redis metrics
+            if redis_manager.is_connected:
+                # Store daily metrics in Redis
+                today = datetime.utcnow().strftime("%Y-%m-%d")
+                metrics_key = generate_cache_key(CacheKeys.ANALYTICS, date=today, metric="daily_stats")
+                
+                metrics = {
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "active_users": 0,  # Would calculate from database
+                    "name_generations": 0,  # Would calculate from database
+                    "api_calls": 0,  # Would calculate from logs
+                }
+                
+                await redis_manager.set(metrics_key, metrics, expire=timedelta(days=30))
+            
+        except Exception as e:
+            logger.error("Metrics collection failed", error=str(e))
+    
+    @classmethod
+    async def get_system_analytics(cls, days: int = 30) -> Dict[str, Any]:
+        """Get system analytics for the last N days"""
+        
+        try:
+            # This would aggregate data from the database and Redis
             return {
-                "origin": f"{name} isminin kökeni analiz edilemedi",
-                "meaning": f"{name} isminin anlamı hakkında detaylı bilgi bulunamadı",
-                "cultural_context": "Kültürel bağlam bilgisi mevcut değil",
-                "characteristics": "Karakteristik özellikler analiz edilemedi",
-                "popularity": "Popülerlik durumu bilinmiyor",
-                "variations": [],
-                "famous_people": [],
-                "modern_perception": "Modern algı bilgisi mevcut değil",
-                "pronunciation": "Telaffuz bilgisi mevcut değil",
-                "recommendations": "Öneriler mevcut değil"
-            } 
+                "period_days": days,
+                "total_users": 0,
+                "active_users": 0,
+                "name_generations": 0,
+                "api_calls": 0,
+                "top_languages": [],
+                "top_themes": [],
+                "generated_at": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error("Failed to get analytics", error=str(e))
+            return {}
+
+
+class SubscriptionService:
+    """Subscription and billing service"""
+    
+    @classmethod
+    def initialize(cls):
+        """Initialize subscription service"""
+        logger.info("SubscriptionService initialized")
+    
+    @classmethod
+    async def get_subscription_plans(cls, db: Session) -> List[SubscriptionPlan]:
+        """Get available subscription plans"""
+        
+        try:
+            plans = db.query(SubscriptionPlan).filter(
+                SubscriptionPlan.is_active == True
+            ).order_by(SubscriptionPlan.price).all()
+            
+            return plans
+            
+        except Exception as e:
+            logger.error("Failed to get subscription plans", error=str(e))
+            return []
+
+    @classmethod
+    async def upgrade_user_subscription(
+        cls, 
+        user: User, 
+        plan_id: int, 
+        db: Session
+    ) -> bool:
+        """Upgrade user to premium subscription"""
+        
+        try:
+            plan = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == plan_id).first()
+            if not plan:
+                return False
+            
+            # Update user subscription
+            user.subscription_status = UserSubscriptionStatus.ACTIVE
+            user.premium_until = datetime.utcnow() + timedelta(days=plan.billing_period_days)
+            user.subscription_plan_id = plan_id
+            
+            db.commit()
+            
+            # Log subscription upgrade
+            audit_logger.log_user_action(
+                user_id=user.id,
+                action="subscription_upgrade",
+                resource="subscription",
+                details={"plan_id": plan_id, "plan_name": plan.name},
+                success=True
+            )
+            
+            logger.info("User subscription upgraded", user_id=user.id, plan_id=plan_id)
+            return True
+            
+        except Exception as e:
+            db.rollback()
+            logger.error("Subscription upgrade failed", user_id=user.id, error=str(e))
+            return False
+        
+
+class FavoriteService:
+    """User favorites management service"""
+    
+    @staticmethod
+    async def add_favorite(
+        user: User,
+        favorite_data: FavoriteNameCreate,
+        db: Session
+    ) -> Optional[UserFavorite]:
+        """Add name to user favorites"""
+        
+        try:
+            # Check if already favorited
+            existing = db.query(UserFavorite).filter(
+                and_(
+                    UserFavorite.user_id == user.id,
+                    UserFavorite.name == favorite_data.name,
+                    UserFavorite.gender == favorite_data.gender,
+                    UserFavorite.language == favorite_data.language
+                )
+            ).first()
+            
+            if existing:
+                return existing
+            
+            # Create new favorite
+            favorite = UserFavorite(
+                user_id=user.id,
+                name=favorite_data.name,
+                meaning=favorite_data.meaning,
+                gender=favorite_data.gender,
+                language=favorite_data.language,
+                theme=favorite_data.theme,
+                notes=favorite_data.notes
+            )
+            
+            db.add(favorite)
+            db.commit()
+            db.refresh(favorite)
+            
+            # Update popular names
+            await cls._update_favorite_count(favorite_data.name, favorite_data.gender, favorite_data.language, db)
+            
+            logger.info("Favorite added", user_id=user.id, name=favorite_data.name)
+            return favorite
+            
+        except Exception as e:
+            db.rollback()
+            logger.error("Failed to add favorite", user_id=user.id, error=str(e))
+            return None
+    
+    @staticmethod
+    async def _update_favorite_count(name: str, gender: str, language: str, db: Session):
+        """Update favorite count in popular names"""
+        
+        try:
+            popular_name = db.query(PopularName).filter(
+                and_(
+                    PopularName.name == name,
+                    PopularName.gender == gender,
+                    PopularName.language == language
+                )
+            ).first()
+            
+            if popular_name:
+                popular_name.favorite_count += 1
+                popular_name.updated_at = datetime.utcnow()
+                db.commit()
+                
+            except Exception as e:
+            logger.error("Failed to update favorite count", error=str(e)) 

@@ -110,7 +110,7 @@ const UserProfile = ({ user, onClose, onUpdate, onShowToast }) => {
           }`}
         >
           <Heart className="w-4 h-4" />
-          <span>Favoriler ({favorites.length})</span>
+          <span>Favoriler ({favorites?.length || 0})</span>
         </button>
         <button
           onClick={() => setActiveTab('stats')}
@@ -178,7 +178,7 @@ const UserProfile = ({ user, onClose, onUpdate, onShowToast }) => {
                 <div>
                   <p className="text-sm text-gray-600">Aktif Gün</p>
                   <p className="text-2xl font-bold text-gray-900">
-                    {Math.floor((new Date() - new Date(user.created_at)) / (1000 * 60 * 60 * 24))}
+                    {user?.created_at ? Math.floor((new Date() - new Date(user.created_at)) / (1000 * 60 * 60 * 24)) : 0}
                   </p>
                 </div>
               </div>
@@ -362,19 +362,19 @@ const UserProfile = ({ user, onClose, onUpdate, onShowToast }) => {
               </div>
               <div className="text-center p-4 bg-green-50 rounded-lg">
                 <div className="text-2xl font-bold text-green-600">
-                  {Math.floor((new Date() - new Date(user.created_at)) / (1000 * 60 * 60 * 24))}
+                  {user?.created_at ? Math.floor((new Date() - new Date(user.created_at)) / (1000 * 60 * 60 * 24)) : 0}
                 </div>
                 <div className="text-sm text-gray-600">Aktif Gün</div>
               </div>
               <div className="text-center p-4 bg-purple-50 rounded-lg">
                 <div className="text-2xl font-bold text-purple-600">
-                  {new Set(favorites.map(fav => fav.language)).size}
+                  {favorites?.length ? new Set(favorites.map(fav => fav.language)).size : 0}
                 </div>
                 <div className="text-sm text-gray-600">Farklı Dil</div>
               </div>
               <div className="text-center p-4 bg-orange-50 rounded-lg">
                 <div className="text-2xl font-bold text-orange-600">
-                  {new Set(favorites.map(fav => fav.theme)).size}
+                  {favorites?.length ? new Set(favorites.map(fav => fav.theme)).size : 0}
                 </div>
                 <div className="text-sm text-gray-600">Farklı Tema</div>
               </div>

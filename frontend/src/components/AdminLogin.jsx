@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Shield, Lock, User } from 'lucide-react';
-import { apiService } from '../services/api';
+import { apiService, tokenManager } from '../services/api';
 
 const AdminLogin = ({ onSuccess }) => {
   const [credentials, setCredentials] = useState({
@@ -19,7 +19,9 @@ const AdminLogin = ({ onSuccess }) => {
       const response = await apiService.login(credentials);
       
       if (response.access_token) {
-        localStorage.setItem('token', response.access_token);
+        // Use the TokenManager to properly store tokens
+        tokenManager.setTokens(response.access_token, response.refresh_token || null);
+        localStorage.setItem('token', response.access_token); // Keep for compatibility with apiService
         
         // Kullanıcı bilgilerini al
         const profile = await apiService.getProfile();
@@ -27,6 +29,7 @@ const AdminLogin = ({ onSuccess }) => {
         // Admin kontrolü
         if (!profile.is_admin) {
           setError('Bu alan sadece admin kullanıcılar için. Normal kullanıcı girişi için ana sayfayı kullanın.');
+          tokenManager.clearTokens();
           localStorage.removeItem('token');
           return;
         }

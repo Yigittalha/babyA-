@@ -272,6 +272,19 @@ class DatabaseManager:
         except Exception:
             return False
 
+    async def test_connection(self) -> bool:
+        """Async version of connection test"""
+        try:
+            if self.connection:
+                cursor = self.connection.cursor()
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Database connection test failed: {e}")
+            return False
+
     # Premium özellikler için fonksiyonlar
     async def get_user_subscription(self, user_id: int) -> Optional[Dict[str, Any]]:
         """Kullanıcının abonelik bilgilerini getir"""
@@ -462,4 +475,138 @@ class DatabaseManager:
             return [dict(row) for row in rows]
         except Exception as e:
             logger.error(f"Error getting all favorites: {e}")
-            return [] 
+            return []
+
+    # Trend analizi için yeni metodlar
+    async def get_recent_favorites_stats(self, days: int = 30) -> List[Dict[str, Any]]:
+        """Son X günde en çok favorilenen isimleri getir"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT 
+                    name,
+                    language,
+                    gender,
+                    theme,
+                    COUNT(*) as favorite_count,
+                    MAX(meaning) as meaning
+                FROM favorite_names 
+                WHERE created_at >= datetime('now', '-{} days')
+                GROUP BY name, language, gender
+                ORDER BY favorite_count DESC, name
+                LIMIT 20
+            """.format(days))
+            
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            logger.error(f"Error getting recent favorites stats: {e}")
+            return []
+
+    async def get_trending_names_by_language(self, days: int = 30) -> Dict[str, List[Dict[str, Any]]]:
+        """Dil bazlı trend analizi"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT 
+                    language,
+                    name,
+                    gender,
+                    theme,
+                    COUNT(*) as popularity,
+                    MAX(meaning) as meaning,
+                    MIN(created_at) as first_used,
+                    MAX(created_at) as last_used
+                FROM favorite_names 
+                WHERE created_at >= datetime('now', '-{} days')
+                GROUP BY language, name
+                HAVING COUNT(*) >= 1
+                ORDER BY language, COUNT(*) DESC
+            """.format(days))
+            
+            rows = cursor.fetchall()
+            
+            # Dillere göre grupla
+            trends_by_language = {}
+            for row in rows:
+                language = row["language"]
+                if language not in trends_by_language:
+                    trends_by_language[language] = []
+                trends_by_language[language].append(dict(row))
+            
+            return trends_by_language
+        except Exception as e:
+            logger.error(f"Error getting trending names by language: {e}")
+            return {}
+
+    async def get_weekly_growth_stats(self) -> List[Dict[str, Any]]:
+        """Haftalık büyüme istatistikleri"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT 
+                    name,
+                    language,
+                    COUNT(CASE WHEN created_at >= datetime('now', '-7 days') THEN 1 END) as this_week,
+                    COUNT(CASE WHEN created_at >= datetime('now', '-14 days') 
+                              AND created_at < datetime('now', '-7 days') THEN 1 END) as last_week
+                FROM favorite_names 
+                WHERE created_at >= datetime('now', '-14 days')
+                GROUP BY name, language
+                HAVING this_week > 0 OR last_week > 0
+                ORDER BY this_week DESC
+            """)
+            
+            rows = cursor.fetchall()
+            results = []
+            
+            for row in rows:
+                this_week = row["this_week"]
+                last_week = row["last_week"]
+                
+                # Büyüme oranını hesapla
+                if last_week > 0:
+                    growth_rate = ((this_week - last_week) / last_week) * 100
+                elif this_week > 0:
+                    growth_rate = 100  # Yeni isim
+                else:
+                    growth_rate = 0
+                
+                results.append({
+                    "name": row["name"],
+                    "language": row["language"],
+                    "this_week": this_week,
+                    "last_week": last_week,
+                    "growth_rate": round(growth_rate, 1)
+                })
+            
+            return results
+        except Exception as e:
+            logger.error(f"Error getting weekly growth stats: {e}")
+            return []
+
+    async def get_theme_popularity(self) -> Dict[str, int]:
+        """Tema popülerliği analizi"""
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute("""
+                SELECT theme, COUNT(*) as count
+                FROM favorite_names 
+                WHERE created_at >= datetime('now', '-30 days')
+                GROUP BY theme
+                ORDER BY count DESC
+            """)
+            
+            rows = cursor.fetchall()
+            return {row["theme"]: row["count"] for row in rows}
+        except Exception as e:
+            logger.error(f"Error getting theme popularity: {e}")
+            return {}
+
+
+# Simple compatibility function for professional version
+def get_db():
+    """Simple compatibility function for SQLAlchemy-style dependency injection"""
+    # For now, this is just a placeholder - professional version needs SQLAlchemy setup
+    # This prevents import errors but professional version will need proper database setup
+    return None 

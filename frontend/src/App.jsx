@@ -372,26 +372,26 @@ function MainApp() {
         <div className="flex items-center space-x-2">
           {currentPage === 'results' && (
             <div className="relative group">
-              <button
-                onClick={handleBackToGenerate}
+            <button
+              onClick={handleBackToGenerate}
                 className="p-2 rounded-lg bg-gray-50 hover:bg-purple-100 text-gray-600 hover:text-purple-600 transition-all duration-200"
                 title="Yeni İsim Üret"
-              >
+            >
                 <Baby className="w-5 h-5" />
-              </button>
+            </button>
               <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
                 Yeni İsim Üret
               </div>
             </div>
           )}
           <div className="relative group">
-            <button
-              onClick={() => setShowAuthModal(true)}
+          <button
+            onClick={() => setShowAuthModal(true)}
               className="p-2 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-600 hover:text-blue-700 transition-all duration-200"
               title="Giriş Yap"
-            >
+          >
               <User className="w-5 h-5" />
-            </button>
+          </button>
             <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
               Giriş Yap
             </div>
@@ -404,13 +404,13 @@ function MainApp() {
       <div className="flex items-center space-x-2">
         {currentPage === 'results' && (
           <div className="relative group">
-            <button
-              onClick={handleBackToGenerate}
+          <button
+            onClick={handleBackToGenerate}
               className="p-2 rounded-lg bg-gray-50 hover:bg-purple-100 text-gray-600 hover:text-purple-600 transition-all duration-200"
               title="Yeni İsim Üret"
-            >
+          >
               <Baby className="w-5 h-5" />
-            </button>
+          </button>
             <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">
               Yeni İsim Üret
             </div>
@@ -418,13 +418,13 @@ function MainApp() {
         )}
         
         <div className="relative group">
-          <button
-            onClick={() => setShowFavorites(true)}
+        <button
+          onClick={() => setShowFavorites(true)}
             className="p-2 rounded-lg bg-pink-50 hover:bg-pink-100 text-pink-600 hover:text-pink-700 transition-all duration-200"
             title="Favoriler"
-          >
+        >
             <Heart className="w-5 h-5" />
-          </button>
+        </button>
           <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">
             Favoriler
           </div>
@@ -432,13 +432,13 @@ function MainApp() {
         
         {user && !user.is_premium && (
           <div className="relative group">
-            <button
-              onClick={handleShowPremiumUpgrade}
+          <button
+            onClick={handleShowPremiumUpgrade}
               className="p-2 rounded-lg bg-yellow-50 hover:bg-yellow-100 text-yellow-600 hover:text-yellow-700 transition-all duration-200"
               title="Premium"
-            >
+          >
               <Crown className="w-5 h-5" />
-            </button>
+          </button>
             <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">
               Premium
             </div>
@@ -446,26 +446,26 @@ function MainApp() {
         )}
         
         <div className="relative group">
-          <button
-            onClick={() => setShowProfile(true)}
+        <button
+          onClick={() => setShowProfile(true)}
             className="p-2 rounded-lg bg-gray-50 hover:bg-gray-100 text-gray-600 hover:text-gray-700 transition-all duration-200"
             title="Profil"
-          >
+        >
             <Settings className="w-5 h-5" />
-          </button>
+        </button>
           <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">
             Profil
           </div>
         </div>
         
         <div className="relative group">
-          <button
-            onClick={handleLogout}
+        <button
+          onClick={handleLogout}
             className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 transition-all duration-200"
             title="Çıkış"
-          >
+        >
             <LogOut className="w-5 h-5" />
-          </button>
+        </button>
           <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50">
             Çıkış
           </div>
@@ -506,7 +506,7 @@ function MainApp() {
                 <div className="relative mb-8">
                   <h1 className="hero-title text-gradient-hero">
                     ✨ Baby <span className="text-pink-500">AI</span> ile Mükemmel İsmi Keşfedin
-                  </h1>
+              </h1>
                   <div className="absolute -top-6 -right-6 text-6xl opacity-20 animate-bounce-gentle">✨</div>
                   <div className="absolute -bottom-4 -left-8 text-4xl opacity-20 animate-float">🌟</div>
                 </div>
@@ -741,19 +741,19 @@ function MainApp() {
                     <span className="text-orange-500">💎</span>
                     <span>Premium Kalite</span>
                   </div>
-                </div>
-
-                <NameForm 
-                  options={options}
-                  onGenerateNames={handleGenerateNames}
-                  loading={loading}
-                  user={user}
-                  onShowToast={showToast}
-                  onError={handleError}
-                  onAnalyzeName={handleAnalyzeName}
-                />
-              </div>
             </div>
+
+            <NameForm 
+              options={options}
+              onGenerateNames={handleGenerateNames}
+              loading={loading}
+              user={user}
+              onShowToast={showToast}
+              onError={handleError}
+              onAnalyzeName={handleAnalyzeName}
+            />
+          </div>
+        </div>
           </div>
         </>
       );
@@ -827,7 +827,7 @@ function MainApp() {
         <div className="container mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
             {/* Left Side - Logo */}
-            <div className="flex items-center space-x-3">
+              <div className="flex items-center space-x-3">
               {/* Simple Cute Baby Logo */}
               <div className="relative group">
                 {/* Cute Baby Face SVG - No container boxes */}
@@ -863,7 +863,7 @@ function MainApp() {
                   <circle cx="18" cy="22" r="0.5" fill="currentColor" className="opacity-30"/>
                   <circle cx="42" cy="38" r="0.5" fill="currentColor" className="opacity-30"/>
                 </svg>
-              </div>
+                </div>
               
               {/* Brand Typography */}
               <div className="flex flex-col">
@@ -899,7 +899,7 @@ function MainApp() {
               >
                 Trendler
               </button>
-              
+
               <button
                 onClick={() => setShowHowItWorks(true)}
                 className="px-5 py-2 rounded-lg text-base font-semibold text-gray-700 hover:text-purple-600 hover:bg-purple-50 transition-all duration-200"
@@ -912,7 +912,7 @@ function MainApp() {
             <div className="flex items-center space-x-3">
               {/* Desktop User Actions */}
               <div className="hidden md:flex items-center">
-                {headerButtons}
+            {headerButtons}
               </div>
               
               {/* Mobile Menu */}
