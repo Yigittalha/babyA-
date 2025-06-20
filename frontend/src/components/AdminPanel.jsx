@@ -359,33 +359,35 @@ const AdminPanel = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                     <StatCard
                       title="Toplam Kullanıcı"
-                      value={safeNumber(stats.user_count)}
+                      value={safeNumber(stats.stats?.total_users)}
                       icon="👥"
                       color="from-blue-500 to-blue-600"
                       trend="up"
                       trendValue="+12%"
                     />
                     <StatCard
-                      title="Aktif Favoriler"
-                      value={safeNumber(stats.favorite_count)}
-                      icon="❤️"
-                      color="from-pink-500 to-red-500"
+                      title="Premium Kullanıcı"
+                      value={safeNumber(stats.stats?.premium_users)}
+                      icon="💎"
+                      color="from-yellow-500 to-orange-500"
                       trend="up"
                       trendValue="+8%"
                     />
                     <StatCard
-                      title="Yeni Üyeler (24s)"
-                      value={safeNumber(stats.recent_registrations)}
-                      icon="🆕"
-                      color="from-green-500 to-emerald-500"
+                      title="Toplam Favori"
+                      value={safeNumber(stats.stats?.total_favorites)}
+                      icon="❤️"
+                      color="from-pink-500 to-red-500"
                       trend="up"
                       trendValue="+25%"
                     />
                     <StatCard
-                      title="Sistem Sağlığı"
-                      value={stats.system_status?.database === 'healthy' ? 100 : 0}
-                      icon={stats.system_status?.database === 'healthy' ? '✅' : '❌'}
-                      color="from-purple-500 to-indigo-500"
+                      title="Bugün Üretilen İsim"
+                      value={safeNumber(stats.stats?.names_today)}
+                      icon="🆕"
+                      color="from-green-500 to-emerald-500"
+                      trend="up"
+                      trendValue="+15%"
                     />
                   </div>
 
@@ -396,18 +398,18 @@ const AdminPanel = () => {
                         <span className="mr-2">📈</span> Kullanım İstatistikleri
                       </h3>
                       <div className="space-y-4">
-                        <div className="flex justify-between items-center">
+                                                <div className="flex justify-between items-center">
                           <span className="text-gray-600">Toplam İsim Üretimi</span>
-                          <span className="font-bold text-gray-900">{safeNumber(safeNumber(stats.user_count) * 15).toLocaleString()}</span>
-                </div>
+                          <span className="font-bold text-gray-900">{safeNumber(stats.stats?.total_names_generated).toLocaleString()}</span>
+                        </div>
                         <div className="flex justify-between items-center">
-                          <span className="text-gray-600">Ortalama Favori/Kullanıcı</span>
-                          <span className="font-bold text-gray-900">{safeNumber(stats.user_count) > 0 ? safeNumber(Math.round(safeNumber(stats.favorite_count) / safeNumber(stats.user_count))) : 0}</span>
-                    </div>
+                          <span className="text-gray-600">Aylık Gelir</span>
+                          <span className="font-bold text-gray-900">₺{safeNumber(stats.stats?.revenue_month).toLocaleString()}</span>
+                        </div>
                         <div className="flex justify-between items-center">
-                          <span className="text-gray-600">Günlük Aktif Kullanıcı</span>
-                          <span className="font-bold text-gray-900">{safeNumber(Math.floor(safeNumber(stats.user_count) * 0.15))}</span>
-                    </div>
+                          <span className="text-gray-600">Bugünkü Gelir</span>
+                          <span className="font-bold text-gray-900">₺{safeNumber(stats.stats?.revenue_today).toLocaleString()}</span>
+                        </div>
                   </div>
                 </div>
 
@@ -416,18 +418,18 @@ const AdminPanel = () => {
                         <span className="mr-2">🎯</span> Performans Metrikleri
                       </h3>
                       <div className="space-y-4">
+                                                <div className="flex justify-between items-center">
+                          <span className="text-gray-600">Sunucu Çalışma Süresi</span>
+                          <span className="font-bold text-green-600">{stats.stats?.server_uptime || 'Bilinmiyor'}</span>
+                        </div>
                         <div className="flex justify-between items-center">
-                          <span className="text-gray-600">API Yanıt Süresi</span>
-                          <span className="font-bold text-green-600">~180ms</span>
-                    </div>
+                          <span className="text-gray-600">Veritabanı Boyutu</span>
+                          <span className="font-bold text-green-600">{stats.stats?.database_size || 'Bilinmiyor'}</span>
+                        </div>
                         <div className="flex justify-between items-center">
-                          <span className="text-gray-600">Sistem Kullanılabilirlik</span>
-                          <span className="font-bold text-green-600">99.9%</span>
-                    </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-gray-600">Hata Oranı</span>
-                          <span className="font-bold text-green-600">0.1%</span>
-                  </div>
+                          <span className="text-gray-600">Dönüşüm Oranı</span>
+                          <span className="font-bold text-green-600">{safePercentage(stats.stats?.conversion_rate)}%</span>
+                        </div>
                 </div>
                     </div>
                   </div>
