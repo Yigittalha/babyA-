@@ -16,8 +16,9 @@ import AdminLogin from './components/AdminLogin';
 import { apiService, formatError, api } from './services/api';
 import './index.css';
 import authStateManager, { onAuthStateChanged, signInWithEmailAndPassword, signOut, getCurrentUser } from './services/authStateManager';
-// SessionManager no longer needed - AuthStateManager handles everything
-import { checkAndCleanupIfNeeded } from './utils/sessionCleanup';
+// Enhanced secure authentication system
+import secureAuthManager from './services/secureAuthManager.js';
+import { setupSessionMaintenance } from './utils/sessionCleanup.js';
 
 // Ana uygulama component'i
 function MainApp() {
@@ -72,20 +73,18 @@ function MainApp() {
 
   // Uygulama başlangıcında seçenekleri yükle ve monitoring sistemlerini başlat
   useEffect(() => {
+    console.log('🚀 App starting up with enhanced security...');
+    
     loadOptions();
     
-    // Debug: Check session state before cleanup
-    console.log('🔍 Debug - Session state before cleanup:');
-    console.log('  Token:', localStorage.getItem('token') ? 'Present' : 'None');
-    console.log('  User data:', localStorage.getItem('baby_ai_user') || localStorage.getItem('user_data') ? 'Present' : 'None');
+    // Setup enhanced session maintenance
+    setupSessionMaintenance();
     
-    // Temporarily disable strict session checks for stability
-    console.log('📝 Skipping strict session checks for now');
+    // Make secure auth manager globally available for error handling
+    window.secureAuthManager = secureAuthManager;
     
     // Initialize subscription monitoring
     api.initSubscriptionMonitoring();
-    
-    // AuthStateManager handles all session management now
     
     // Cleanup on unmount
     return () => {
@@ -93,51 +92,71 @@ function MainApp() {
     };
   }, []);
 
-  // Firebase Auth benzeri authentication state monitoring
+  // Enhanced authentication state monitoring with secure auth manager
   useEffect(() => {
-    console.log('🔐 Setting up Firebase Auth-like authentication monitoring...');
+    console.log('🔐 Setting up enhanced authentication monitoring...');
     
-    // Firebase Auth benzeri onAuthStateChanged
-    const unsubscribe = onAuthStateChanged((currentUser, previousUser) => {
-      console.log('🔄 Auth state changed:', {
+    // Primary: Secure Auth Manager (httpOnly cookies, CSRF protection)
+    const secureUnsubscribe = secureAuthManager.onAuthStateChanged((currentUser, previousUser, eventType) => {
+      console.log('🔄 Secure auth state changed:', {
         current: currentUser?.email || 'None',
-        previous: previousUser?.email || 'None'
+        previous: previousUser?.email || 'None',
+        event: eventType
       });
       
-              if (currentUser) {
-          // User is signed in
-          console.log('✅ User authenticated:', currentUser.email);
-          setUser(currentUser);
-          
-          // Load user's favorites after a short delay to ensure token is set
-          setTimeout(() => {
-            loadFavorites(currentUser.id);
-          }, 100);
-          
-          // AuthStateManager handles everything now - no need for SessionManager sync
-          
-        } else {
-          // User is signed out
-          console.log('📝 User signed out');
-          setUser(null);
-          setFavorites([]);
-          
-          // Clear UI state
-          setShowProfile(false);
-          setShowFavorites(false);
-          setShowPremiumUpgrade(false);
-          setCurrentPage('generate');
-          
-          // AuthStateManager handles session clearing automatically
+      if (currentUser) {
+        // User is signed in with enhanced security
+        console.log('✅ User authenticated securely:', currentUser.email);
+        setUser(currentUser);
+        
+        // Load user's favorites after a short delay to ensure authentication is complete
+        setTimeout(() => {
+          loadFavorites(currentUser.id);
+        }, 100);
+        
+      } else {
+        // User is signed out
+        console.log('📝 User signed out');
+        setUser(null);
+        setFavorites([]);
+        
+        // Clear UI state
+        setShowProfile(false);
+        setShowFavorites(false);
+        setShowPremiumUpgrade(false);
+        setCurrentPage('generate');
+        
+        // Handle session expiration events
+        if (eventType === 'auth:session_expired') {
+          showToast({ 
+            message: 'Oturum süresi doldu. Lütfen tekrar giriş yapın.', 
+            type: 'warning',
+            duration: 8000
+          });
         }
+      }
     });
     
-    // Cleanup subscription on unmount
+    // Fallback: Legacy Auth State Manager (for backward compatibility)
+    const legacyUnsubscribe = onAuthStateChanged((currentUser, previousUser) => {
+      // Only use legacy auth if secure auth is not active
+      if (!secureAuthManager.currentUser && currentUser) {
+        console.log('🔄 Fallback auth state changed:', currentUser.email);
+        setUser(currentUser);
+        
+        setTimeout(() => {
+          loadFavorites(currentUser.id);
+        }, 100);
+      }
+    });
+    
+    // Cleanup subscriptions on unmount
     return () => {
-      console.log('🧹 Cleaning up auth state listener');
-      unsubscribe();
+      console.log('🧹 Cleaning up auth state listeners');
+      secureUnsubscribe();
+      legacyUnsubscribe();
     };
-  }, []); // Empty dependency array - sadece mount'ta çalışsın
+  }, [loadFavorites, showToast]); // Dependencies for the effect
 
   // Toast fonksiyonunu en başta tanımla
   const showToast = useCallback(({ message, type = 'info', duration = 5000 }) => {
@@ -316,52 +335,84 @@ function MainApp() {
 
   const handleAuthSuccess = useCallback(async (email, password) => {
     try {
-      console.log('🔐 handleAuthSuccess: Processing sign in for:', email);
+      console.log('🔐 handleAuthSuccess: Processing secure sign in for:', email);
       
-      // Use Firebase Auth-like sign in
-      const result = await signInWithEmailAndPassword(email, password);
-      
-      if (result.success) {
-        console.log('✅ handleAuthSuccess: Sign in successful');
-        setShowAuthModal(false);
+      // Try secure authentication first
+      try {
+        const result = await secureAuthManager.signInWithEmailAndPassword(email, password, false, 'Web Browser');
         
-        // Show success message
-        showToast({ message: 'Başarıyla giriş yapıldı!', type: 'success' });
+        if (result.success) {
+          console.log('✅ handleAuthSuccess: Secure sign in successful');
+          setShowAuthModal(false);
+          
+          // Show success message
+          showToast({ message: 'Güvenli giriş başarılı! 🔐', type: 'success' });
+          
+          // Auth state will be updated automatically via secure auth manager
+          return;
+        }
+      } catch (secureError) {
+        console.warn('🔄 Secure auth failed, trying fallback:', secureError.message);
         
-        // Auth state will be updated automatically via onAuthStateChanged
-        // User will be set and favorites will be loaded automatically
+        // Fallback to legacy authentication for backward compatibility
+        const result = await signInWithEmailAndPassword(email, password);
         
-      } else {
-        throw new Error('Sign in failed');
+        if (result.success) {
+          console.log('✅ handleAuthSuccess: Fallback sign in successful');
+          setShowAuthModal(false);
+          
+          // Show success message
+          showToast({ message: 'Başarıyla giriş yapıldı!', type: 'success' });
+          
+          return;
+        }
+        
+        throw secureError; // Re-throw the original secure auth error
       }
       
     } catch (error) {
-      console.error('❌ handleAuthSuccess: Sign in failed:', error);
+      console.error('❌ handleAuthSuccess: All sign in methods failed:', error);
       throw error; // Re-throw to let AuthModal handle the error
     }
   }, [showToast]);
 
   const handleLogout = async () => {
     try {
-      console.log('🔐 handleLogout: Processing sign out...');
+      console.log('🔐 handleLogout: Processing secure sign out...');
       
-      // Use Firebase Auth-like sign out
-      await signOut();
+      // Try secure logout first
+      try {
+        await secureAuthManager.signOut();
+        console.log('✅ handleLogout: Secure sign out completed');
+      } catch (secureError) {
+        console.warn('🔄 Secure logout failed, trying fallback:', secureError.message);
+        
+        // Fallback to legacy logout
+        await signOut();
+        console.log('✅ handleLogout: Fallback sign out completed');
+      }
       
       // Clear UI state
       setCurrentPage('generate');
       setShowProfile(false);
       setShowFavorites(false);
       
-      // Auth state will be cleared automatically via onAuthStateChanged
+      // Show logout message
+      showToast({ message: 'Güvenli çıkış yapıldı', type: 'success' });
       
-      console.log('✅ handleLogout: Sign out completed');
+      // Auth state will be cleared automatically via auth managers
       
     } catch (error) {
-      console.error('❌ handleLogout: Sign out failed:', error);
-      // Even if signOut fails, clear local state
+      console.error('❌ handleLogout: All sign out methods failed:', error);
+      
+      // Force clear local state as last resort
       setUser(null);
       setFavorites([]);
+      setCurrentPage('generate');
+      setShowProfile(false);
+      setShowFavorites(false);
+      
+      showToast({ message: 'Çıkış yapıldı', type: 'info' });
     }
   };
 

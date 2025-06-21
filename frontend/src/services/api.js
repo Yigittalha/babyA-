@@ -7,6 +7,111 @@ import axios from 'axios';
 // API base URL
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
+// Create enhanced Axios instance for secure authentication
+import axios from 'axios';
+
+export const apiClient = axios.create({
+  baseURL: API_BASE_URL,
+  timeout: 30000,
+  withCredentials: true, // Enable httpOnly cookies
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Secure token refresh mechanism using httpOnly cookies
+let refreshPromise = null;
+
+// Request interceptor for secure authentication
+apiClient.interceptors.request.use(
+  (config) => {
+    // Add security headers
+    config.headers['X-Requested-With'] = 'XMLHttpRequest';
+    
+    // CSRF token is automatically handled by secureAuthManager
+    // httpOnly cookies are automatically sent
+    
+    // Legacy token support for backward compatibility
+    const legacyToken = localStorage.getItem('token') || localStorage.getItem('baby_ai_token');
+    if (legacyToken && !config.headers.Authorization) {
+      config.headers.Authorization = `Bearer ${legacyToken}`;
+    }
+    
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+// Response interceptor for secure error handling
+apiClient.interceptors.response.use(
+  (response) => response.data,
+  async (error) => {
+    const originalRequest = error.config;
+    
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+      
+      // Skip refresh for auth endpoints
+      if (originalRequest.url?.includes('/auth/')) {
+        return Promise.reject({
+          status: error.response?.status,
+          message: error.response?.data?.detail || error.message,
+          data: error.response?.data
+        });
+      }
+      
+      // Use singleton refresh promise to prevent multiple refreshes
+      if (!refreshPromise) {
+        refreshPromise = apiClient.post('/auth/refresh', {})
+          .then(() => {
+            console.log('🔄 Token refreshed via httpOnly cookies');
+            return true;
+          })
+          .catch((refreshError) => {
+            console.warn('🔄 Token refresh failed:', refreshError);
+            
+            // Notify secure auth manager of session expiry
+            if (window.secureAuthManager) {
+              window.secureAuthManager.handleSessionExpired();
+            }
+            
+            throw refreshError;
+          })
+          .finally(() => {
+            refreshPromise = null;
+          });
+      }
+      
+      try {
+        await refreshPromise;
+        return apiClient(originalRequest);
+      } catch (refreshError) {
+        return Promise.reject({
+          status: 401,
+          message: 'Session expired. Please login again.',
+          sessionExpired: true
+        });
+      }
+    }
+    
+    // Handle other errors
+    return Promise.reject({
+      status: error.response?.status || 500,
+      message: error.response?.data?.detail || error.message || 'An error occurred',
+      data: error.response?.data,
+      code: error.code
+    });
+  }
+);
+
+// Utility function to get cookie value (for CSRF token reading)
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(';').shift();
+  return null;
+}
+
 // Token management with proactive refresh - Compatible with AuthStateManager
 class TokenManager {
   constructor() {

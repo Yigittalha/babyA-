@@ -27,6 +27,11 @@ from slowapi.middleware import SlowAPIMiddleware
 from .models import NameGenerationRequest, NameGenerationResponse, NameSuggestion, UserRegistration, FavoriteNameCreate
 from .database import DatabaseManager
 
+# Import new security modules
+from .auth_endpoints import router as auth_router
+from .auth_middleware import auth_middleware, get_current_user_enhanced, get_current_user_optional
+from .security import SecurityConfig
+
 # Load environment
 load_dotenv()
 print(f"Environment loaded. OpenRouter key present: {bool(os.getenv('OPENROUTER_API_KEY'))}")
@@ -147,14 +152,20 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 # Create FastAPI app
 app = FastAPI(
     title="Baby AI - Baby Name Generator",
-    version="1.2.0",
-    description="AI-powered baby name generator with premium features",
+    version="2.0.0",
+    description="Professional AI-powered baby name generator with enterprise-grade security",
 )
+
+# Add enhanced security middleware
+app.middleware("http")(auth_middleware)
 
 # Add rate limiting
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+
+# Include authentication router
+app.include_router(auth_router)
 
 # CORS middleware
 app.add_middleware(
@@ -597,10 +608,13 @@ Sadece JSON formatında yanıt ver, başka açıklama yazma.
 # Enhanced name generation with AI integration, usage tracking and plan-based restrictions
 @app.post("/generate", response_model=NameGenerationResponse)
 @limiter.limit("100/minute")
-async def generate_names(request: Request, request_data: NameGenerationRequest, user_id: Optional[int] = Depends(verify_token_optional)):
+async def generate_names(request: Request, request_data: NameGenerationRequest, current_user: Optional[User] = Depends(get_current_user_optional)):
     """Generate baby names with AI integration, plan-based restrictions and usage tracking"""
     
     try:
+        # Extract user_id for compatibility with existing code
+        user_id = current_user.id if current_user else None
+        
         # Handle anonymous users
         if user_id is None:
             logger.info("Anonymous user making generate request, using default limits")
@@ -937,11 +951,13 @@ async def test_endpoint():
     """Test endpoint"""
     return {"message": "Backend çalışıyor!", "timestamp": datetime.utcnow()}
 
-# Auth endpoints
+# Legacy Auth endpoints (for backward compatibility)
 @app.post("/auth/login")
-@limiter.limit("50/minute")
-async def login(request: Request, login_data: dict):
-    """Login endpoint with database"""
+@limiter.limit("10/minute")  # Reduced rate limit, encourage new endpoint usage
+async def legacy_login(request: Request, login_data: dict):
+    """Legacy login endpoint - maintained for backward compatibility"""
+    logger.warning("Using legacy login endpoint - consider migrating to secure /auth/login")
+    
     try:
         email = login_data.get("email", "")
         password = login_data.get("password", "")
@@ -950,54 +966,68 @@ async def login(request: Request, login_data: dict):
         if not email or not password:
             raise HTTPException(status_code=400, detail="Email and password are required")
         
-        logger.debug(f"Login attempt for email: {email}")
+        logger.debug(f"Legacy login attempt for email: {email}")
         
-        # Check database connection first
-        if not db_manager.is_connected():
-            logger.warning("Database not connected, attempting to reconnect")
-            try:
-                await db_manager.initialize()
-            except Exception as conn_error:
-                logger.error(f"Database connection failed: {conn_error}")
-                raise HTTPException(status_code=503, detail="Database temporarily unavailable")
+        # Use the new secure authentication backend
+        from .security import SecurityUtils, AuthTokens
+        from .database_models import User, UserStatus
+        from .database import get_db
         
-        # Try database authentication
+        # Get database session
+        db = next(get_db())
+        
         try:
-            user = await db_manager.authenticate_user(email, password)
-            if user:
-                access_token = create_access_token(data={"sub": user["id"]})
-                logger.info(f"Login successful for user: {email} (ID: {user['id']})")
-                return {
-                    "success": True,
-                    "message": "Giriş başarılı",
-                    "user": {
-                        "id": user["id"],
-                        "email": user["email"],
-                        "name": user["name"],
-                        "role": "admin" if user.get("is_admin") else "user",
-                        "is_admin": bool(user.get("is_admin", False))
-                    },
-                    "access_token": access_token,
-                    "token_type": "bearer"
-                }
-            else:
-                # Explicit authentication failure (wrong password)
-                logger.warning(f"Authentication failed for email: {email} - invalid credentials")
+            # Find user
+            user = db.query(User).filter(
+                User.email == email.lower(),
+                User.status != UserStatus.DELETED
+            ).first()
+            
+            if not user or not SecurityUtils.verify_password(password, user.password_hash):
+                logger.warning(f"Legacy authentication failed for email: {email}")
                 raise HTTPException(status_code=401, detail="Invalid email or password")
+            
+            if user.status == UserStatus.SUSPENDED:
+                raise HTTPException(status_code=403, detail="Account suspended")
+            
+            # Create tokens using new secure system
+            access_token = AuthTokens.create_access_token(
+                user.id, 
+                user.email, 
+                user.subscription_status.value, 
+                user.is_admin
+            )
+            
+            # Note: Legacy endpoint returns token in body (less secure than cookies)
+            logger.info(f"Legacy login successful for user: {email} (ID: {user.id})")
+            
+            return {
+                "success": True,
+                "message": "Giriş başarılı",
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "name": user.name,
+                    "subscription_type": user.subscription_status.value,
+                    "role": "admin" if user.is_admin else "user",
+                    "is_admin": bool(user.is_admin)
+                },
+                "access_token": access_token,
+                "token_type": "bearer"
+            }
                 
         except HTTPException:
-            # Re-raise HTTP exceptions as-is
             raise
         except Exception as db_error:
-            # Database error during authentication
-            logger.error(f"Database authentication error for {email}: {db_error}")
+            logger.error(f"Legacy authentication error for {email}: {db_error}")
             raise HTTPException(status_code=503, detail="Authentication service temporarily unavailable")
+        finally:
+            db.close()
         
     except HTTPException:
-        # Re-raise HTTP exceptions as-is
         raise
     except Exception as e:
-        logger.error(f"Login endpoint error: {e}")
+        logger.error(f"Legacy login endpoint error: {e}")
         raise HTTPException(status_code=500, detail="Login failed")
 
 @app.post("/auth/register")

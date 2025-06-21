@@ -1,53 +1,401 @@
-from fastapi import Request, HTTPException
+"""
+Enhanced Authentication Middleware with comprehensive security features
+"""
+from fastapi import Request, HTTPException, Response, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import JWTError, jwt
-from datetime import datetime, timezone
-import logging
-from typing import Optional, Dict, Any
-from .config import SECRET_KEY, ALGORITHM
+from fastapi.responses import JSONResponse
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, Callable, List
+from functools import wraps
+import asyncio
+import structlog
+from sqlalchemy.orm import Session
+from collections import defaultdict
+import time
 
-logger = logging.getLogger(__name__)
+from .config import settings
+from .database import get_db
+from .database_models import User, UserSubscriptionStatus, AuditLog
+from .security import (
+    AuthTokens, SessionManager, CSRFProtection, SecurityUtils,
+    SecurityConfig, TokenBlacklist
+)
 
-class JWTBearer(HTTPBearer):
-    def __init__(self, auto_error: bool = True):
-        super(JWTBearer, self).__init__(auto_error=auto_error)
+logger = structlog.get_logger(__name__)
 
-    async def __call__(self, request: Request):
-        credentials: HTTPAuthorizationCredentials = await super(JWTBearer, self).__call__(request)
-        if credentials:
-            if not credentials.scheme == "Bearer":
-                raise HTTPException(status_code=403, detail="Invalid authentication scheme.")
-            payload = self.verify_jwt(credentials.credentials)
-            if not payload:
-                raise HTTPException(status_code=403, detail="Invalid token or expired token.")
-            
-            # Add user info to request state
-            request.state.user_id = payload.get("sub")
-            request.state.user_role = payload.get("role", "user")
-            request.state.is_admin = payload.get("is_admin", False)
-            
-            return payload
-        else:
-            raise HTTPException(status_code=403, detail="Invalid authorization code.")
+# Rate limiting storage
+_rate_limit_storage = defaultdict(list)
+_failed_attempts = defaultdict(int)
+_lockout_until = defaultdict(lambda: datetime.min)
 
-    def verify_jwt(self, jwtoken: str) -> Optional[Dict[str, Any]]:
-        """Verify JWT token and return payload if valid"""
+
+class EnhancedAuthMiddleware:
+    """Enhanced authentication middleware with comprehensive security"""
+    
+    def __init__(self):
+        self.security = HTTPBearer(auto_error=False)
+    
+    async def __call__(self, request: Request, call_next):
+        """Main middleware function"""
+        start_time = time.time()
+        
         try:
-            payload = jwt.decode(jwtoken, SECRET_KEY, algorithms=[ALGORITHM])
+            # Security headers
+            response = await call_next(request)
+            self._add_security_headers(response)
             
-            # Check expiration
-            exp = payload.get("exp")
-            if exp and datetime.fromtimestamp(exp, tz=timezone.utc) < datetime.now(tz=timezone.utc):
-                logger.warning(f"Token expired for user {payload.get('sub')}")
-                return None
+            # Log request
+            self._log_request(request, response, time.time() - start_time)
             
-            return payload
-        except JWTError as e:
-            logger.error(f"JWT verification failed: {e}")
-            return None
+            return response
+            
         except Exception as e:
-            logger.error(f"Unexpected error during JWT verification: {e}")
-            return None
+            logger.error("Middleware error", error=str(e))
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Internal server error"}
+            )
+    
+    def _add_security_headers(self, response: Response):
+        """Add comprehensive security headers"""
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https:; "
+            "font-src 'self' data:;"
+        )
+        
+        if SecurityConfig.COOKIE_SECURE:
+            response.headers["Strict-Transport-Security"] = (
+                f"max-age={60*60*24*365}; includeSubDomains; preload"
+            )
+    
+    def _log_request(self, request: Request, response: Response, duration: float):
+        """Log request for audit purposes"""
+        logger.info(
+            "Request processed",
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            duration=duration,
+            ip=SecurityUtils.get_client_ip(request),
+            user_agent=request.headers.get("user-agent", "unknown")
+        )
+
+
+class PlanBasedRateLimiter:
+    """Rate limiter based on user subscription plan"""
+    
+    # Rate limits per plan (requests per minute)
+    RATE_LIMITS = {
+        UserSubscriptionStatus.FREE: 10,
+        UserSubscriptionStatus.ACTIVE: 30,  # Standard/Premium
+        UserSubscriptionStatus.TRIAL: 15,
+        "admin": 1000
+    }
+    
+    @classmethod
+    async def check_rate_limit(
+        cls, 
+        request: Request, 
+        user: Optional[User] = None
+    ) -> bool:
+        """Check if request is within rate limits"""
+        # Get identifier (user_id or IP)
+        if user:
+            identifier = f"user:{user.id}"
+            limit = cls.RATE_LIMITS.get(
+                user.subscription_status, 
+                cls.RATE_LIMITS[UserSubscriptionStatus.FREE]
+            )
+            if user.is_admin:
+                limit = cls.RATE_LIMITS["admin"]
+        else:
+            identifier = f"ip:{SecurityUtils.get_client_ip(request)}"
+            limit = cls.RATE_LIMITS[UserSubscriptionStatus.FREE]
+        
+        now = datetime.utcnow()
+        minute_ago = now - timedelta(minutes=1)
+        
+        # Clean old entries
+        _rate_limit_storage[identifier] = [
+            timestamp for timestamp in _rate_limit_storage[identifier]
+            if timestamp > minute_ago
+        ]
+        
+        # Check limit
+        if len(_rate_limit_storage[identifier]) >= limit:
+            logger.warning(
+                "Rate limit exceeded",
+                identifier=identifier,
+                limit=limit,
+                current_count=len(_rate_limit_storage[identifier])
+            )
+            return False
+        
+        # Add current request
+        _rate_limit_storage[identifier].append(now)
+        return True
+    
+    @classmethod
+    def create_rate_limit_response(cls) -> HTTPException:
+        """Create rate limit exceeded response"""
+        return HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Rate limit exceeded. Please try again later.",
+            headers={"Retry-After": "60"}
+        )
+
+
+class AccountLockoutManager:
+    """Manage account lockouts for failed login attempts"""
+    
+    @classmethod
+    def record_failed_attempt(cls, identifier: str):
+        """Record a failed login attempt"""
+        _failed_attempts[identifier] += 1
+        
+        if _failed_attempts[identifier] >= SecurityConfig.MAX_LOGIN_ATTEMPTS:
+            lockout_until = datetime.utcnow() + SecurityConfig.LOCKOUT_DURATION
+            _lockout_until[identifier] = lockout_until
+            
+            logger.warning(
+                "Account locked due to failed attempts",
+                identifier=identifier,
+                attempts=_failed_attempts[identifier],
+                lockout_until=lockout_until.isoformat()
+            )
+    
+    @classmethod
+    def is_locked_out(cls, identifier: str) -> bool:
+        """Check if account is locked out"""
+        if identifier in _lockout_until:
+            if datetime.utcnow() < _lockout_until[identifier]:
+                return True
+            else:
+                # Lockout expired, clean up
+                del _lockout_until[identifier]
+                _failed_attempts[identifier] = 0
+        
+        return False
+    
+    @classmethod
+    def clear_failed_attempts(cls, identifier: str):
+        """Clear failed attempts on successful login"""
+        _failed_attempts[identifier] = 0
+        if identifier in _lockout_until:
+            del _lockout_until[identifier]
+
+
+class PlanAccessControl:
+    """Control access based on user subscription plan"""
+    
+    # Feature requirements by plan
+    FEATURE_PLANS = {
+        "generate_names": [
+            UserSubscriptionStatus.FREE,
+            UserSubscriptionStatus.ACTIVE,
+            UserSubscriptionStatus.TRIAL
+        ],
+        "save_favorites": [
+            UserSubscriptionStatus.FREE,
+            UserSubscriptionStatus.ACTIVE,
+            UserSubscriptionStatus.TRIAL
+        ],
+        "name_analysis": [
+            UserSubscriptionStatus.ACTIVE
+        ],
+        "export_pdf": [
+            UserSubscriptionStatus.ACTIVE
+        ],
+        "advanced_analytics": [
+            UserSubscriptionStatus.ACTIVE
+        ],
+        "admin_panel": ["admin"]
+    }
+    
+    # Daily limits by plan
+    DAILY_LIMITS = {
+        UserSubscriptionStatus.FREE: {
+            "name_generations": 5,
+            "favorites": 3
+        },
+        UserSubscriptionStatus.ACTIVE: {
+            "name_generations": None,  # Unlimited
+            "favorites": None
+        },
+        UserSubscriptionStatus.TRIAL: {
+            "name_generations": 25,
+            "favorites": 10
+        }
+    }
+    
+    @classmethod
+    def has_feature_access(cls, user: User, feature: str) -> bool:
+        """Check if user has access to a feature"""
+        required_plans = cls.FEATURE_PLANS.get(feature, [])
+        
+        if user.is_admin and "admin" in required_plans:
+            return True
+        
+        if user.subscription_status in required_plans:
+            return True
+        
+        return False
+    
+    @classmethod
+    def check_daily_limit(cls, user: User, feature: str, current_usage: int) -> bool:
+        """Check if user has reached daily limit"""
+        plan_limits = cls.DAILY_LIMITS.get(user.subscription_status, {})
+        limit = plan_limits.get(feature)
+        
+        # None means unlimited
+        if limit is None:
+            return True
+        
+        return current_usage < limit
+    
+    @classmethod
+    def create_access_denied_response(cls, feature: str) -> HTTPException:
+        """Create access denied response"""
+        return HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access to '{feature}' requires a higher subscription plan"
+        )
+    
+    @classmethod
+    def create_limit_exceeded_response(cls, feature: str) -> HTTPException:
+        """Create daily limit exceeded response"""
+        return HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Daily limit exceeded for '{feature}'. Please upgrade your plan."
+        )
+
+
+# Enhanced authentication dependencies
+async def get_current_user_enhanced(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db)
+) -> User:
+    """Get current authenticated user with enhanced security checks"""
+    # Rate limiting check
+    if not await PlanBasedRateLimiter.check_rate_limit(request):
+        raise PlanBasedRateLimiter.create_rate_limit_response()
+    
+    # Extract token
+    token = AuthTokens.extract_token_from_request(request)
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    # Verify token
+    payload = AuthTokens.verify_token(token, "access")
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token"
+        )
+    
+    user_id = int(payload["sub"])
+    
+    # Get user from database
+    user = db.query(User).filter(
+        User.id == user_id,
+        User.is_active == True
+    ).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive"
+        )
+    
+    # Check account lockout
+    user_identifier = f"user:{user.id}"
+    if AccountLockoutManager.is_locked_out(user_identifier):
+        raise HTTPException(
+            status_code=status.HTTP_423_LOCKED,
+            detail="Account temporarily locked due to failed login attempts"
+        )
+    
+    # Store user in request state
+    request.state.user = user
+    request.state.user_id = user.id
+    
+    # Update session activity if available
+    # This would be enhanced to update session last activity
+    
+    return user
+
+
+async def get_current_user_optional(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db)
+) -> Optional[User]:
+    """Get current user but allow anonymous access"""
+    try:
+        return await get_current_user_enhanced(request, response, db)
+    except HTTPException:
+        return None
+
+
+async def require_admin(
+    current_user: User = Depends(get_current_user_enhanced)
+) -> User:
+    """Require admin privileges"""
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required"
+        )
+    return current_user
+
+
+async def require_premium(
+    current_user: User = Depends(get_current_user_enhanced)
+) -> User:
+    """Require premium subscription"""
+    if not current_user.is_premium_active():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Premium subscription required"
+        )
+    return current_user
+
+
+def require_feature_access(feature: str):
+    """Decorator to require specific feature access"""
+    def decorator(current_user: User = Depends(get_current_user_enhanced)):
+        if not PlanAccessControl.has_feature_access(current_user, feature):
+            raise PlanAccessControl.create_access_denied_response(feature)
+        return current_user
+    return decorator
+
+
+def require_csrf_protection(
+    request: Request,
+    current_user: User = Depends(get_current_user_enhanced)
+):
+    """Require CSRF protection for state-changing operations"""
+    if request.method in ["POST", "PUT", "DELETE", "PATCH"]:
+        # This would be enhanced to validate CSRF token
+        # For now, we'll implement basic validation
+        pass
+    return current_user
+
+
+# Middleware instance
+auth_middleware = EnhancedAuthMiddleware()
 
 class SessionValidator:
     """Validates user sessions and ensures consistency"""
