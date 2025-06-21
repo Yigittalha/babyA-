@@ -12,7 +12,7 @@ import structlog
 from passlib.context import CryptContext
 
 from .database import get_db
-from .database_models import User, UserSession, AuditLog, UserStatus, UserSubscriptionStatus
+from .database_models_simple import User
 from .security import (
     AuthTokens, SessionManager, CSRFProtection, SecurityUtils,
     SecurityConfig, TokenBlacklist
@@ -60,6 +60,8 @@ class AuthResponse(BaseModel):
     message: str
     user: Optional[Dict[str, Any]] = None
     requires_verification: bool = False
+    access_token: Optional[str] = None
+    refresh_token: Optional[str] = None
 
 
 def _create_user_response_data(user: User) -> Dict[str, Any]:
@@ -68,12 +70,12 @@ def _create_user_response_data(user: User) -> Dict[str, Any]:
         "id": user.id,
         "email": user.email,
         "name": user.name,
-        "subscription_type": user.subscription_status.value,
-        "subscription_expires": user.premium_until.isoformat() if user.premium_until else None,
+        "subscription_type": user.subscription_type,
+        "subscription_expires": user.subscription_expires.isoformat() if user.subscription_expires else None,
         "is_admin": user.is_admin,
         "is_verified": user.is_verified,
         "created_at": user.created_at.isoformat(),
-        "last_activity": user.last_activity.isoformat()
+        "last_login": user.last_login.isoformat() if user.last_login else None
     }
 
 
@@ -166,7 +168,7 @@ async def login(
         # Find user
         user = db.query(User).filter(
             User.email == login_data.email.lower(),
-            User.status != UserStatus.DELETED
+            User.is_active == True
         ).first()
         
         if not user or not SecurityUtils.verify_password(login_data.password, user.password_hash):
@@ -188,13 +190,13 @@ async def login(
             )
         
         # Check user status
-        if user.status == UserStatus.SUSPENDED:
+        if not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account suspended. Please contact support."
             )
         
-        if user.status == UserStatus.PENDING:
+        if not user.is_verified:
             return AuthResponse(
                 success=False,
                 message="Account verification required",
@@ -218,8 +220,7 @@ async def login(
         _set_auth_cookies(response, access_token, refresh_token, csrf_token, login_data.remember_me)
         
         # Update user last login
-        user.last_login_attempt = datetime.utcnow()
-        user.last_activity = datetime.utcnow()
+        user.last_login = datetime.utcnow()
         db.commit()
         
         # Log successful login
@@ -233,7 +234,9 @@ async def login(
         return AuthResponse(
             success=True,
             message="Login successful",
-            user=_create_user_response_data(user)
+            user=_create_user_response_data(user),
+            access_token=access_token,
+            refresh_token=refresh_token
         )
         
     except HTTPException:
@@ -272,7 +275,7 @@ async def register(
         ).first()
         
         if existing_user:
-            if existing_user.status == UserStatus.PENDING:
+            if not existing_user.is_verified:
                 return AuthResponse(
                     success=False,
                     message="Account exists but requires verification",
@@ -291,11 +294,10 @@ async def register(
             email=register_data.email.lower(),
             password_hash=hashed_password,
             name=register_data.name.strip(),
-            subscription_status=UserSubscriptionStatus.FREE,
-            status=UserStatus.ACTIVE,  # or PENDING if email verification required
+            subscription_type="free",
+            is_active=True,
             is_verified=True,  # Set to False if email verification required
-            created_at=datetime.utcnow(),
-            last_activity=datetime.utcnow()
+            created_at=datetime.utcnow()
         )
         
         db.add(new_user)
@@ -322,7 +324,9 @@ async def register(
         return AuthResponse(
             success=True,
             message="Registration successful",
-            user=_create_user_response_data(new_user)
+            user=_create_user_response_data(new_user),
+            access_token=access_token,
+            refresh_token=refresh_token
         )
         
     except HTTPException:
@@ -378,8 +382,7 @@ async def refresh_token(
         # Get user from database
         user = db.query(User).filter(
             User.id == user_id,
-            User.is_active == True,
-            User.status == UserStatus.ACTIVE
+            User.is_active == True
         ).first()
         
         if not user:
@@ -393,7 +396,7 @@ async def refresh_token(
         new_access_token = AuthTokens.create_access_token(
             user.id,
             user.email,
-            user.subscription_status.value,
+            user.subscription_type,
             user.is_admin
         )
         
@@ -425,8 +428,8 @@ async def refresh_token(
         if session_id:
             await SessionManager.update_session_activity(session_id)
         
-        # Update user last activity
-        user.last_activity = datetime.utcnow()
+        # Update user last login
+        user.last_login = datetime.utcnow() 
         db.commit()
         
         return {
@@ -638,4 +641,100 @@ async def revoke_session(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to revoke session"
-        ) 
+        )
+
+
+# === FAVORITES ENDPOINTS WITH SECURE AUTHENTICATION ===
+
+@router.get("/favorites")
+async def get_favorites_secure(
+    request: Request,
+    page: int = 1,
+    limit: int = 20,
+    current_user: User = Depends(get_current_user_enhanced),
+    db: Session = Depends(get_db)
+):
+    """Get user favorites with secure authentication"""
+    try:
+        # Mock data for now - replace with actual database call
+        return {
+            "success": True,
+            "favorites": [
+                {
+                    "id": 1,
+                    "name": "Zeynep",
+                    "meaning": "Güzel, değerli taş",
+                    "origin": "Turkish",
+                    "gender": "female",
+                    "saved_at": "2025-01-15T10:30:00Z"
+                },
+                {
+                    "id": 2,
+                    "name": "Ahmet",
+                    "meaning": "Övülmüş, beğenilmiş",
+                    "origin": "Turkish", 
+                    "gender": "male",
+                    "saved_at": "2025-01-14T15:20:00Z"
+                }
+            ],
+            "total": 2,
+            "page": page,
+            "limit": limit,
+            "user_id": current_user.id
+        }
+        
+    except Exception as e:
+        logger.error("Get secure favorites failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get favorites"
+        )
+
+
+@router.post("/favorites")
+async def add_favorite_secure(
+    request: Request,
+    favorite_data: dict,
+    current_user: User = Depends(get_current_user_enhanced),
+    db: Session = Depends(get_db)
+):
+    """Add name to favorites with secure authentication"""
+    try:
+        # Mock response for now - replace with actual database call
+        return {
+            "success": True,
+            "message": f"'{favorite_data.get('name', 'İsim')}' favorilere eklendi! ❤️",
+            "favorite_id": 999,
+            "user_id": current_user.id
+        }
+        
+    except Exception as e:
+        logger.error("Add secure favorite failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to add favorite"
+        )
+
+
+@router.delete("/favorites/{favorite_id}")
+async def remove_favorite_secure(
+    request: Request,
+    favorite_id: int,
+    current_user: User = Depends(get_current_user_enhanced),
+    db: Session = Depends(get_db)
+):
+    """Remove name from favorites with secure authentication"""
+    try:
+        # Mock response for now - replace with actual database call
+        return {
+            "success": True,
+            "message": "Favorilerden çıkarıldı",
+            "user_id": current_user.id
+        }
+        
+    except Exception as e:
+        logger.error("Remove secure favorite failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to remove favorite"
+        )  

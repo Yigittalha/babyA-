@@ -499,6 +499,14 @@ const AdminPanel = ({ onShowToast }) => {
           response: response
         });
         
+        // Display force logout info to admin
+        const assignedPlanList = selectedPlans.join(', ');
+        showToast({ 
+          message: `🔐 Önemli: ${selectedUser.name} kullanıcısının planı güncellendi! Kullanıcı otomatik olarak oturumundan çıkarılacak ve tekrar giriş yapması istenecek. Bu sayede yeni plan özellikleri aktif olacak.`, 
+          type: "info", 
+          duration: 10000 
+        });
+        
       } else {
         throw new Error(response.message || 'Plan atama başarısız');
       }

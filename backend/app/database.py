@@ -52,8 +52,7 @@ class DatabaseManager:
                 subscription_expires TIMESTAMP,
                 is_admin INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_login TIMESTAMP,
-                subscription_type TEXT DEFAULT 'free'
+                last_login TIMESTAMP
             )
         """)
         
@@ -1234,7 +1233,7 @@ class DatabaseManager:
             # Önce mevcut aktif planları deaktif et
             cursor.execute("""
                 UPDATE subscription_history 
-                SET status = 'deactivated', updated_at = datetime('now')
+                SET status = 'deactivated'
                 WHERE user_id = ? AND status = 'active'
             """, (user_id,))
             deactivated_count = cursor.rowcount
@@ -1269,7 +1268,7 @@ class DatabaseManager:
             
             cursor.execute("""
                 UPDATE users 
-                SET subscription_type = ?, subscription_expires = ?, updated_at = datetime('now')
+                SET subscription_type = ?, subscription_expires = ?
                 WHERE id = ?
             """, (primary_plan, expires_at, user_id))
             
@@ -1284,8 +1283,8 @@ class DatabaseManager:
             
             cursor.execute("""
                 INSERT INTO subscription_history 
-                (user_id, subscription_type, started_at, expires_at, payment_amount, payment_currency, status, created_at)
-                VALUES (?, ?, datetime('now'), ?, ?, ?, 'active', datetime('now'))
+                (user_id, subscription_type, started_at, expires_at, payment_amount, payment_currency, status)
+                VALUES (?, ?, datetime('now'), ?, ?, ?, 'active')
             """, (user_id, primary_plan, expires_at, payment_amount, "USD"))
             
             # Verify the subscription history was inserted
@@ -1302,6 +1301,11 @@ class DatabaseManager:
             final_plan = cursor.fetchone()
             if final_plan and dict(final_plan)['subscription_type'] == primary_plan:
                 logger.info(f"✅ Plan assignment VERIFIED: {primary_plan} to user {user_id} (payment: ${payment_amount})")
+                
+                # FORCE USER RE-LOGIN: Invalidate all existing sessions for this user
+                await self._invalidate_user_sessions(user_id, "Plan upgrade - please login again")
+                logger.info(f"🔐 All sessions invalidated for user {user_id} due to plan change")
+                
                 return True
             else:
                 logger.error(f"❌ Plan assignment VERIFICATION FAILED for user {user_id}")
@@ -1362,10 +1366,128 @@ class DatabaseManager:
             logger.error(f"Error getting plan analytics: {e}")
             return {"plan_stats": [], "popular_combinations": []}
 
+    async def _invalidate_user_sessions(self, user_id: int, reason: str = "Session invalidated by admin"):
+        """Kullanıcının tüm aktif session'larını geçersiz kıl - FORCE RE-LOGIN"""
+        try:
+            cursor = self.connection.cursor()
+            
+            # Get user email for logging
+            cursor.execute("SELECT email FROM users WHERE id = ?", (user_id,))
+            user_result = cursor.fetchone()
+            user_email = dict(user_result)['email'] if user_result else f"ID:{user_id}"
+            
+            # Create a session invalidation table if it doesn't exist
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS invalidated_sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    reason TEXT,
+                    invalidated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+                )
+            """)
+            
+            # Record session invalidation
+            cursor.execute("""
+                INSERT INTO invalidated_sessions (user_id, reason)
+                VALUES (?, ?)
+            """, (user_id, reason))
+            
+            # Update user's last_login to current time to force token refresh
+            cursor.execute("""
+                UPDATE users 
+                SET last_login = datetime('now')
+                WHERE id = ?
+            """, (user_id,))
+            
+            self.connection.commit()
+            
+            logger.info(f"🔐 Force logout: All sessions invalidated for user {user_email} (ID: {user_id}). Reason: {reason}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error invalidating sessions for user {user_id}: {e}")
+            return False
 
-# Simple compatibility function for professional version
+    async def is_user_session_valid(self, user_id: int, token_issued_at: float) -> bool:
+        """Check if user session is still valid (not force-invalidated)"""
+        try:
+            cursor = self.connection.cursor()
+            
+            # Check if there's any invalidation after token was issued
+            cursor.execute("""
+                SELECT COUNT(*) as count
+                FROM invalidated_sessions 
+                WHERE user_id = ? 
+                AND datetime(invalidated_at) > datetime(?, 'unixepoch')
+            """, (user_id, token_issued_at))
+            
+            result = cursor.fetchone()
+            count = dict(result)['count'] if result else 0
+            
+            # If count > 0, means session was invalidated after token issue
+            is_valid = count == 0
+            
+            if not is_valid:
+                logger.info(f"🚫 Session invalid for user {user_id}: Token issued at {token_issued_at}, but sessions were invalidated later")
+            
+            return is_valid
+            
+        except Exception as e:
+            logger.error(f"Error checking session validity for user {user_id}: {e}")
+            return True  # Default to valid if error occurs
+
+
+# SQLAlchemy Setup for Professional Authentication System
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.pool import StaticPool
+from .database_models_simple import Base
+
+# Database configuration
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./baby_names.db")
+
+# Create SQLAlchemy engine
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+    poolclass=StaticPool if "sqlite" in DATABASE_URL else None,
+    echo=False  # Set to True for SQL debugging
+)
+
+# Create SessionLocal class
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Create tables
+def create_tables():
+    """Create all database tables"""
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("SQLAlchemy tables created successfully")
+    except Exception as e:
+        logger.error(f"Error creating SQLAlchemy tables: {e}")
+        raise
+
+# Dependency to get DB session
 def get_db():
-    """Simple compatibility function for SQLAlchemy-style dependency injection"""
-    # For now, this is just a placeholder - professional version needs SQLAlchemy setup
-    # This prevents import errors but professional version will need proper database setup
-    return None 
+    """Get database session for dependency injection"""
+    db = SessionLocal()
+    try:
+        yield db
+    except Exception as e:
+        logger.error(f"Database session error: {e}")
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+# Initialize SQLAlchemy database
+def init_sqlalchemy_db():
+    """Initialize SQLAlchemy database with tables"""
+    try:
+        create_tables()
+        logger.info("SQLAlchemy database initialized successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to initialize SQLAlchemy database: {e}")
+        return False 

@@ -8,9 +8,7 @@ import axios from 'axios';
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 // Create enhanced Axios instance for secure authentication
-import axios from 'axios';
-
-export const apiClient = axios.create({
+const axiosClient = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
   withCredentials: true, // Enable httpOnly cookies
@@ -23,19 +21,22 @@ export const apiClient = axios.create({
 let refreshPromise = null;
 
 // Request interceptor for secure authentication
-apiClient.interceptors.request.use(
+axiosClient.interceptors.request.use(
   (config) => {
     // Add security headers
     config.headers['X-Requested-With'] = 'XMLHttpRequest';
     
-    // CSRF token is automatically handled by secureAuthManager
-    // httpOnly cookies are automatically sent
-    
-    // Legacy token support for backward compatibility
-    const legacyToken = localStorage.getItem('token') || localStorage.getItem('baby_ai_token');
-    if (legacyToken && !config.headers.Authorization) {
-      config.headers.Authorization = `Bearer ${legacyToken}`;
-    }
+      // Get token from AuthStateManager compatible keys (primary)
+  const authToken = localStorage.getItem('baby_ai_token') || localStorage.getItem('token');
+  
+  // Fallback to enhanced token manager keys if primary not available
+  const enhancedToken = enhancedTokenManager.getAccessToken();
+  
+  // Use the first available token for Authorization header
+  const tokenToUse = authToken || enhancedToken;
+  if (tokenToUse && !config.headers.Authorization) {
+    config.headers.Authorization = `Bearer ${tokenToUse}`;
+  }
     
     return config;
   },
@@ -43,7 +44,7 @@ apiClient.interceptors.request.use(
 );
 
 // Response interceptor for secure error handling
-apiClient.interceptors.response.use(
+axiosClient.interceptors.response.use(
   (response) => response.data,
   async (error) => {
     const originalRequest = error.config;
@@ -51,8 +52,28 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
       
+      // Check for force re-login header (plan change, session invalidation)
+      const forceRelogin = error.response?.headers?.['x-force-relogin'];
+      if (forceRelogin === 'true') {
+        console.warn('🔐 Plan değişikliği algılandı - zorla tekrar giriş yapılıyor');
+        enhancedTokenManager.handleTokenExpired();
+        
+        // Show plan upgrade notification
+        show401Toast('Plan bilgileriniz güncellendi! Yeni özelliklerinizi kullanmak için lütfen tekrar giriş yapın.', 'info');
+        
+        return Promise.reject({
+          status: 401,
+          message: 'Plan güncellendi. Yeni özelliklerinize erişmek için lütfen tekrar giriş yapın.',
+          sessionInvalidated: true,
+          forceRelogin: true,
+          planUpgrade: true
+        });
+      }
+      
       // Skip refresh for auth endpoints
       if (originalRequest.url?.includes('/auth/')) {
+        // For auth endpoints, notify enhanced token manager of expired tokens
+        enhancedTokenManager.handleTokenExpired();
         return Promise.reject({
           status: error.response?.status,
           message: error.response?.data?.detail || error.message,
@@ -60,32 +81,27 @@ apiClient.interceptors.response.use(
         });
       }
       
-      // Use singleton refresh promise to prevent multiple refreshes
-      if (!refreshPromise) {
-        refreshPromise = apiClient.post('/auth/refresh', {})
-          .then(() => {
-            console.log('🔄 Token refreshed via httpOnly cookies');
-            return true;
-          })
-          .catch((refreshError) => {
-            console.warn('🔄 Token refresh failed:', refreshError);
-            
-            // Notify secure auth manager of session expiry
-            if (window.secureAuthManager) {
-              window.secureAuthManager.handleSessionExpired();
-            }
-            
-            throw refreshError;
-          })
-          .finally(() => {
-            refreshPromise = null;
-          });
-      }
-      
+      // Try token refresh with enhanced token manager
       try {
-        await refreshPromise;
-        return apiClient(originalRequest);
+        await enhancedTokenManager.refreshAccessToken();
+        console.log('🔄 Token refreshed successfully');
+        
+        // Update Authorization header with new token (use compatible keys)
+        const newToken = localStorage.getItem('baby_ai_token') || localStorage.getItem('token') || enhancedTokenManager.getAccessToken();
+        if (newToken) {
+          originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        }
+        
+        return axiosClient(originalRequest);
       } catch (refreshError) {
+        console.warn('🔄 Token refresh failed:', refreshError);
+        
+        // Clear all token variants to avoid conflicts
+        enhancedTokenManager.clearTokens();
+        
+        // Show user-friendly notification
+        show401Toast('Your session has expired. Please login again.');
+        
         return Promise.reject({
           status: 401,
           message: 'Session expired. Please login again.',
@@ -111,6 +127,247 @@ function getCookie(name) {
   if (parts.length === 2) return parts.pop().split(';').shift();
   return null;
 }
+
+// Enhanced Token Management for localStorage + Authorization Header
+class EnhancedTokenManager {
+  constructor() {
+    this.accessToken = null;
+    this.refreshToken = null;
+    this.refreshPromise = null;
+    this.isRefreshing = false;
+    
+    // Load tokens from localStorage on init
+    this.loadTokensFromStorage();
+    
+    // Setup automatic refresh monitoring
+    this.setupTokenMonitoring();
+  }
+
+  // Load tokens from localStorage (AuthStateManager compatible)
+  loadTokensFromStorage() {
+    try {
+      // Use AuthStateManager compatible keys first
+      this.accessToken = localStorage.getItem('baby_ai_token') || localStorage.getItem('token') || localStorage.getItem('auth_access_token');
+      this.refreshToken = localStorage.getItem('refresh_token') || localStorage.getItem('auth_refresh_token');
+      
+      // Validate token format
+      if (this.accessToken && !this.isValidJWT(this.accessToken)) {
+        console.warn('Invalid access token format, clearing tokens');
+        this.clearTokens();
+      }
+      
+      console.log('🔐 Tokens loaded from storage:', {
+        hasAccess: !!this.accessToken,
+        hasRefresh: !!this.refreshToken
+      });
+    } catch (error) {
+      console.error('Failed to load tokens from storage:', error);
+      this.clearTokens();
+    }
+  }
+
+  // Save tokens to localStorage (AuthStateManager compatible)
+  setTokens(accessToken, refreshToken) {
+    try {
+      this.accessToken = accessToken;
+      this.refreshToken = refreshToken;
+      
+      if (accessToken) {
+        // Store in AuthStateManager compatible keys (primary)
+        localStorage.setItem('baby_ai_token', accessToken);
+        localStorage.setItem('token', accessToken); // Legacy compatibility
+        // Also keep enhanced keys for backward compatibility
+        localStorage.setItem('auth_access_token', accessToken);
+      }
+      if (refreshToken) {
+        // Store in AuthStateManager compatible keys (primary)
+        localStorage.setItem('refresh_token', refreshToken);
+        // Also keep enhanced keys for backward compatibility
+        localStorage.setItem('auth_refresh_token', refreshToken);
+      }
+      
+      console.log('✅ Tokens saved to storage');
+      
+      // Broadcast token change to other tabs
+      this.broadcastTokenChange('login');
+      
+    } catch (error) {
+      console.error('Failed to save tokens to storage:', error);
+    }
+  }
+
+  // Clear all tokens (all key variants)
+  clearTokens() {
+    try {
+      this.accessToken = null;
+      this.refreshToken = null;
+      
+      // Clear AuthStateManager keys
+      localStorage.removeItem('baby_ai_token');
+      localStorage.removeItem('token');
+      localStorage.removeItem('baby_ai_user');  
+      localStorage.removeItem('refresh_token');
+      localStorage.removeItem('user_data');
+      
+      // Clear Enhanced Token Manager keys
+      localStorage.removeItem('auth_access_token');
+      localStorage.removeItem('auth_refresh_token');
+      localStorage.removeItem('auth_user_data');
+      
+      console.log('🧹 All tokens cleared');
+      
+      // Broadcast logout to other tabs
+      this.broadcastTokenChange('logout');
+      
+    } catch (error) {
+      console.error('Failed to clear tokens:', error);
+    }
+  }
+
+  // Get current access token (AuthStateManager compatible)
+  getAccessToken() {
+    return this.accessToken || localStorage.getItem('baby_ai_token') || localStorage.getItem('token') || localStorage.getItem('auth_access_token');
+  }
+
+  // Get current refresh token (AuthStateManager compatible)
+  getRefreshToken() {
+    return this.refreshToken || localStorage.getItem('refresh_token') || localStorage.getItem('auth_refresh_token');
+  }
+
+  // Check if we have valid tokens
+  hasValidTokens() {
+    const token = this.getAccessToken();
+    return token && this.isValidJWT(token) && !this.isTokenExpired(token);
+  }
+
+  // Validate JWT format
+  isValidJWT(token) {
+    try {
+      return token && token.split('.').length === 3;
+    } catch {
+      return false;
+    }
+  }
+
+  // Check if token is expired
+  isTokenExpired(token) {
+    try {
+      if (!token) return true;
+      
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      const currentTime = Date.now() / 1000;
+      
+      // Check if token expires within next 2 minutes
+      return payload.exp < (currentTime + 120);
+    } catch {
+      return true;
+    }
+  }
+
+  // Setup automatic token monitoring
+  setupTokenMonitoring() {
+    // Check tokens every 5 minutes
+    setInterval(() => {
+      const token = this.getAccessToken();
+      if (token && this.isTokenExpired(token) && !this.isRefreshing) {
+        console.log('🔄 Token expired, attempting refresh...');
+        this.refreshAccessToken().catch(error => {
+          console.error('Auto refresh failed:', error);
+          this.handleTokenExpired();
+        });
+      }
+    }, 5 * 60 * 1000); // 5 minutes
+  }
+
+  // Refresh access token
+  async refreshAccessToken() {
+    const refreshToken = this.getRefreshToken();
+    
+    if (!refreshToken) {
+      throw new Error('No refresh token available');
+    }
+
+    // Prevent multiple simultaneous refresh attempts
+    if (this.refreshPromise) {
+      return this.refreshPromise;
+    }
+
+    this.isRefreshing = true;
+
+    this.refreshPromise = fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${refreshToken}`
+      },
+      credentials: 'include'
+    }).then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Refresh failed: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (data.access_token) {
+        this.setTokens(data.access_token, data.refresh_token || refreshToken);
+        console.log('✅ Token refreshed successfully');
+        return data.access_token;
+      }
+      
+      throw new Error('Invalid refresh response');
+    }).catch(error => {
+      console.error('❌ Token refresh failed:', error);
+      this.handleTokenExpired();
+      throw error;
+    }).finally(() => {
+      this.refreshPromise = null;
+      this.isRefreshing = false;
+    });
+
+    return this.refreshPromise;
+  }
+
+  // Handle token expiration
+  handleTokenExpired() {
+    console.warn('🚨 Tokens expired, logging out user');
+    this.clearTokens();
+    
+    // Redirect to login if not already there
+    if (window.location.pathname !== '/login' && window.location.pathname !== '/') {
+      window.location.pathname = '/login';
+    }
+    
+    // Dispatch logout event
+    window.dispatchEvent(new CustomEvent('auth:logout', {
+      detail: { reason: 'token_expired' }
+    }));
+  }
+
+  // Cross-tab synchronization
+  broadcastTokenChange(action) {
+    try {
+      const event = new CustomEvent('auth:change', {
+        detail: { action, timestamp: Date.now() }
+      });
+      window.dispatchEvent(event);
+      
+      // Also use localStorage for cross-tab communication
+      localStorage.setItem('auth_sync', JSON.stringify({
+        action,
+        timestamp: Date.now()
+      }));
+      
+      setTimeout(() => {
+        localStorage.removeItem('auth_sync');
+      }, 1000);
+    } catch (error) {
+      console.warn('Failed to broadcast token change:', error);
+    }
+  }
+}
+
+// Global enhanced token manager
+const enhancedTokenManager = new EnhancedTokenManager();
 
 // Token management with proactive refresh - Compatible with AuthStateManager
 class TokenManager {
@@ -357,6 +614,7 @@ class APIClient {
     const requestOptions = {
       ...options,
       headers,
+      credentials: 'include', // Send cookies with requests
     };
 
     try {
@@ -481,7 +739,7 @@ class APIClient {
 }
 
 // Global API client instance
-const apiClient = new APIClient();
+const apiClientInstance = new APIClient();
 
 // Professional API service
 export const api = {
@@ -507,7 +765,7 @@ export const api = {
   // Check and warn about subscription expiry
   async checkSubscriptionStatus() {
     try {
-      const response = await apiClient.get('/api/subscription/status');
+      const response = await apiClientInstance.get('/api/subscription/status');
       this.subscriptionStatus = response.subscription;
       
       if (response.subscription && response.subscription.plan_id !== 'free') {
@@ -665,21 +923,21 @@ export const api = {
 
   // Health and system
   async healthCheck() {
-    return apiClient.get('/health');
+    return apiClientInstance.get('/health');
   },
 
   async getSystemInfo() {
-    return apiClient.get('/health/detailed');
+    return apiClientInstance.get('/health/detailed');
   },
 
   // Authentication endpoints
   async register(userData) {
-    const response = await apiClient.post('/auth/register', userData);
+    const response = await apiClientInstance.post('/auth/register', userData);
     return response;
   },
 
   async login(credentials) {
-    const response = await apiClient.post('/auth/login', credentials);
+    const response = await apiClientInstance.post('/auth/login', credentials);
     
     if (response.access_token && response.refresh_token) {
       tokenManager.setTokens(response.access_token, response.refresh_token);
@@ -691,7 +949,7 @@ export const api = {
   async logout() {
     try {
       // Optionally call logout endpoint to invalidate tokens server-side
-      await apiClient.post('/auth/logout');
+      await apiClientInstance.post('/auth/logout');
     } catch (error) {
       console.warn('Logout endpoint failed:', error);
     } finally {
@@ -705,162 +963,162 @@ export const api = {
 
   // Name generation with enhanced features
   async generateNames(requestData) {
-    return apiClient.post('/generate', requestData);
+    return apiClientInstance.post('/generate', requestData);
   },
 
   async getPopularNames(params = {}) {
-    return apiClient.get('/popular', params);
+    return apiClientInstance.get('/popular', params);
   },
 
   async getNameTrends(params = {}) {
-    return apiClient.get('/trends', params);
+    return apiClientInstance.get('/trends', params);
   },
 
   async analyzeNameCompatibility(name1, name2) {
-    return apiClient.post('/analyze/compatibility', { name1, name2 });
+    return apiClientInstance.post('/analyze/compatibility', { name1, name2 });
   },
 
   // User management
   async getUserProfile() {
-    return apiClient.get('/profile');
+    return apiClientInstance.get('/profile');
   },
 
   async updateUserProfile(profileData) {
-    return apiClient.put('/profile', profileData);
+    return apiClientInstance.put('/profile', profileData);
   },
 
   async deleteAccount() {
-    return apiClient.delete('/profile');
+    return apiClientInstance.delete('/profile');
   },
 
   // Favorites management
   async getFavorites(params = {}) {
-    return apiClient.get('/favorites', params);
+    return apiClientInstance.get('/favorites', params);
   },
 
   async addFavorite(favoriteData) {
-    return apiClient.post('/favorites', favoriteData);
+    return apiClientInstance.post('/favorites', favoriteData);
   },
 
   async removeFavorite(favoriteId) {
-    return apiClient.delete(`/favorites/${favoriteId}`);
+    return apiClientInstance.delete(`/favorites/${favoriteId}`);
   },
 
   async updateFavorite(favoriteId, updateData) {
-    return apiClient.patch(`/favorites/${favoriteId}`, updateData);
+    return apiClientInstance.patch(`/favorites/${favoriteId}`, updateData);
   },
 
   // Subscription management
   async getSubscriptionPlans() {
-    return apiClient.get('/subscription/plans');
+    return apiClientInstance.get('/subscription/plans');
   },
 
   async getSubscriptionStatus() {
-    return apiClient.get('/subscription/status');
+    return apiClientInstance.get('/subscription/status');
   },
 
   async upgradeToPremium(planId) {
-    return apiClient.post('/subscription/upgrade', { plan_id: planId });
+    return apiClientInstance.post('/subscription/upgrade', { plan_id: planId });
   },
 
   async cancelSubscription() {
-    return apiClient.post('/subscription/cancel');
+    return apiClientInstance.post('/subscription/cancel');
   },
 
   // Analytics (for premium users)
   async getUserAnalytics(params = {}) {
-    return apiClient.get('/analytics/user', params);
+    return apiClientInstance.get('/analytics/user', params);
   },
 
   async getNameUsageStats() {
-    return apiClient.get('/analytics/names');
+    return apiClientInstance.get('/analytics/names');
   },
 
   // Admin endpoints
   async getUsers(params = {}) {
-    return apiClient.get('/admin/users', params);
+    return apiClientInstance.get('/admin/users', params);
   },
 
   async getSystemAnalytics(params = {}) {
-    return apiClient.get('/admin/analytics', params);
+    return apiClientInstance.get('/admin/analytics', params);
   },
 
   async updateUserStatus(userId, status) {
-    return apiClient.put(`/admin/users/${userId}/status`, { status });
+    return apiClientInstance.put(`/admin/users/${userId}/status`, { status });
   },
 
   // NEW: Advanced Admin Analytics APIs
   async getRevenueAnalytics(days = 30) {
-    return apiClient.get('/admin/analytics/revenue', { days });
+    return apiClientInstance.get('/admin/analytics/revenue', { days });
   },
 
   async getActivityAnalytics(days = 30) {
-    return apiClient.get('/admin/analytics/activity', { days });
+    return apiClientInstance.get('/admin/analytics/activity', { days });
   },
 
   async getConversionAnalytics(days = 30) {
-    return apiClient.get('/admin/analytics/conversion', { days });
+    return apiClientInstance.get('/admin/analytics/conversion', { days });
   },
 
   async getPlanAnalytics() {
-    return apiClient.get('/admin/analytics/plans');
+    return apiClientInstance.get('/admin/analytics/plans');
   },
 
   // NEW: User Search API
   async searchUsers(query, page = 1, limit = 20) {
-    return apiClient.get('/admin/users/search', { query, page, limit });
+    return apiClientInstance.get('/admin/users/search', { query, page, limit });
   },
 
   // NEW: Multi-Plan Subscription APIs
   async getUserActivePlans(userId) {
-    return apiClient.get(`/admin/users/${userId}/plans`);
+    return apiClientInstance.get(`/admin/users/${userId}/plans`);
   },
 
   async assignMultiplePlans(userId, planNames) {
-    return apiClient.put(`/admin/users/${userId}/plans`, { plan_names: planNames });
+    return apiClientInstance.put(`/admin/users/${userId}/plans`, { plan_names: planNames });
   },
 
   // Enhanced existing admin APIs
   async deleteUser(userId) {
-    return apiClient.delete(`/admin/users/${userId}`);
+    return apiClientInstance.delete(`/admin/users/${userId}`);
   },
 
   async updateUserSubscription(userId, subscriptionData) {
-    return apiClient.put(`/admin/users/${userId}/subscription`, subscriptionData);
+    return apiClientInstance.put(`/admin/users/${userId}/subscription`, subscriptionData);
   },
 
   async getAdminStats() {
-    return apiClient.get('/admin/stats');
+    return apiClientInstance.get('/admin/stats');
   },
 
   async getAdminFavorites(page = 1, limit = 20) {
-    return apiClient.get('/admin/favorites', { page, limit });
+    return apiClientInstance.get('/admin/favorites', { page, limit });
   },
 
   async getAdminSystem() {
-    return apiClient.get('/admin/system');
+    return apiClientInstance.get('/admin/system');
   },
 
   // Settings and preferences
   async getUserSettings() {
-    return apiClient.get('/settings');
+    return apiClientInstance.get('/settings');
   },
 
   async updateUserSettings(settings) {
-    return apiClient.put('/settings', settings);
+    return apiClientInstance.put('/settings', settings);
   },
 
   // Session management
   async getActiveSessions() {
-    return apiClient.get('/sessions');
+    return apiClientInstance.get('/sessions');
   },
 
   async terminateSession(sessionId) {
-    return apiClient.delete(`/sessions/${sessionId}`);
+    return apiClientInstance.delete(`/sessions/${sessionId}`);
   },
 
   async terminateAllSessions() {
-    return apiClient.delete('/sessions/all');
+    return apiClientInstance.delete('/sessions/all');
   },
 
   // File uploads (if needed)
@@ -868,7 +1126,7 @@ export const api = {
     const formData = new FormData();
     formData.append('file', file);
 
-    return apiClient.makeRequest('/upload', {
+    return apiClientInstance.makeRequest('/upload', {
       method: 'POST',
       body: formData,
       headers: {
@@ -959,8 +1217,8 @@ export const connectionStatus = {
 // Initialize connection monitoring
 connectionStatus.startMonitoring();
 
-// Export token manager and apiClient for external use
-export { tokenManager, apiClient };
+// Export secure API client and token manager for external use
+export { tokenManager, apiClientInstance as apiClient, axiosClient, enhancedTokenManager };
 
 // Default export
 export default api;
@@ -974,73 +1232,73 @@ export const apiService = {
 
   // Genel GET isteği
   async get(url) {
-    const response = await apiClient.get(url);
+    const response = await apiClientInstance.get(url);
     return response;
   },
 
   // Genel POST isteği
   async post(url, data = {}) {
-    const response = await apiClient.post(url, data);
+    const response = await apiClientInstance.post(url, data);
     return response;
   },
 
   // Genel PUT isteği
   async put(url, data = {}) {
-    const response = await apiClient.put(url, data);
+    const response = await apiClientInstance.put(url, data);
     return response;
   },
 
   // Genel DELETE isteği  
   async delete(url) {
-    const response = await apiClient.delete(url);
+    const response = await apiClientInstance.delete(url);
     return response;
   },
 
   // Mevcut seçenekleri al
   async getOptions() {
-    const response = await apiClient.get('/options');
+    const response = await apiClientInstance.get('/options');
     return response;
   },
 
   // Test endpoint'i (sadece development)
   async testEndpoint() {
-    const response = await apiClient.get('/test');
+    const response = await apiClientInstance.get('/test');
     return response;
   },
 
   // Kullanıcı girişi
   async login(credentials) {
-    const response = await apiClient.post('/auth/login', credentials);
+    const response = await apiClientInstance.post('/auth/login', credentials);
     return response;
   },
 
   // Kullanıcı profili
   async getProfile() {
-    const response = await apiClient.get('/profile');
+    const response = await apiClientInstance.get('/profile');
     return response;
   },
 
   // Favori isim ekle
   async addFavorite(favoriteData) {
-    const response = await apiClient.post('/favorites', favoriteData);
+    const response = await apiClientInstance.post('/favorites', favoriteData);
     return response;
   },
 
   // Favori isimleri getir
   async getFavorites(page = 1, limit = 20) {
-    const response = await apiClient.get('/favorites', { page, limit });
+    const response = await apiClientInstance.get('/favorites', { page, limit });
     return response;
   },
 
   // Favori ismi sil
   async deleteFavorite(favoriteId) {
-    const response = await apiClient.delete(`/favorites/${favoriteId}`);
+    const response = await apiClientInstance.delete(`/favorites/${favoriteId}`);
     return response;
   },
 
   // Favori ismi güncelle
   async updateFavorite(favoriteId, favoriteData) {
-    const response = await apiClient.patch(`/favorites/${favoriteId}`, favoriteData);
+    const response = await apiClientInstance.patch(`/favorites/${favoriteId}`, favoriteData);
     return response;
   },
 
@@ -1049,7 +1307,7 @@ export const apiService = {
     console.log('🚀 API: generateNames called');
     console.log('📝 Request data:', requestData);
     
-    const response = await apiClient.post('/generate', requestData);
+    const response = await apiClientInstance.post('/generate', requestData);
     console.log('✅ API: generateNames response:', response);
     return response;
   },
@@ -1061,7 +1319,7 @@ export const apiService = {
     console.log('📊 Name type:', typeof name);
     console.log('📊 Name value:', JSON.stringify(name));
     
-    const response = await apiClient.post('/analyze_name', { name, language });
+    const response = await apiClientInstance.post('/analyze_name', { name, language });
     console.log('✅ API: analyzeName response:', response);
     return response;
   },
@@ -1184,7 +1442,7 @@ export const formatError = (error) => {
 
 export const getTrends = async () => {
   try {
-    const response = await apiClient.get('/api/trends');
+    const response = await apiClientInstance.get('/api/trends');
     return response;
   } catch (error) {
     console.error('Trends API error:', error);
@@ -1194,7 +1452,7 @@ export const getTrends = async () => {
 
 export const getGlobalTrends = async () => {
   try {
-    const response = await apiClient.get('/api/trends/global');
+    const response = await apiClientInstance.get('/api/trends/global');
     return response;
   } catch (error) {
     console.error('Global trends API error:', error);
@@ -1204,7 +1462,7 @@ export const getGlobalTrends = async () => {
 
 export const getPremiumNames = async (requestData) => {
   try {
-    const response = await apiClient.post('/api/names/premium', requestData);
+    const response = await apiClientInstance.post('/api/names/premium', requestData);
     return response;
   } catch (error) {
     console.error('Premium names API error:', error);
@@ -1214,7 +1472,7 @@ export const getPremiumNames = async (requestData) => {
 
 export const getSubscriptionPlans = async () => {
   try {
-    const response = await apiClient.get('/api/subscription/plans');
+    const response = await apiClientInstance.get('/api/subscription/plans');
     return response;
   } catch (error) {
     console.error('Subscription plans API error:', error);
@@ -1224,7 +1482,7 @@ export const getSubscriptionPlans = async () => {
 
 export const getSubscriptionStatus = async () => {
   try {
-    const response = await apiClient.get('/api/subscription/status');
+    const response = await apiClientInstance.get('/api/subscription/status');
     return response;
   } catch (error) {
     console.error('Subscription status API error:', error);
@@ -1234,7 +1492,7 @@ export const getSubscriptionStatus = async () => {
 
 export const upgradeSubscription = async (planType, paymentMethod = 'credit_card') => {
   try {
-    const response = await apiClient.post('/api/subscription/upgrade', {
+    const response = await apiClientInstance.post('/api/subscription/upgrade', {
       plan_type: planType,
       payment_method: paymentMethod
     });
@@ -1247,7 +1505,7 @@ export const upgradeSubscription = async (planType, paymentMethod = 'credit_card
 
 export const getSubscriptionHistory = async () => {
   try {
-    const response = await apiClient.get('/api/subscription/history');
+    const response = await apiClientInstance.get('/api/subscription/history');
     return response;
   } catch (error) {
     console.error('Subscription history API error:', error);
@@ -1257,7 +1515,7 @@ export const getSubscriptionHistory = async () => {
 
 export const getNamesByTheme = async (theme, gender, count) => {
   try {
-    const response = await apiClient.post('/names/theme', {
+    const response = await apiClientInstance.post('/names/theme', {
       theme,
       gender,
       count
@@ -1268,3 +1526,21 @@ export const getNamesByTheme = async (theme, gender, count) => {
     return { success: false, error: 'Tema bazlı isimler alınamadı' };
   }
 }; 
+
+// Enhanced toast notification for auth events (401 errors, plan upgrades)
+const show401Toast = (message = 'Session expired. Please login again.', type = 'error') => {
+  if (window.showToast) {
+    window.showToast({
+      message,
+      type: type,
+      duration: type === 'info' ? 8000 : 5000 // Longer duration for info messages
+    });
+  } else {
+    // Fallback notification
+    console.warn(`🚨 AUTH ${type.toUpperCase()}:`, message);
+    alert(message);
+  }
+};
+
+// Export notification function
+export { show401Toast }; 

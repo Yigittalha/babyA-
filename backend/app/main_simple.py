@@ -25,7 +25,8 @@ from slowapi.middleware import SlowAPIMiddleware
 
 # Import existing modules that work
 from .models import NameGenerationRequest, NameGenerationResponse, NameSuggestion, UserRegistration, FavoriteNameCreate
-from .database import DatabaseManager
+from .database import DatabaseManager, init_sqlalchemy_db
+from .database_models_simple import User
 
 # Import new security modules
 from .auth_endpoints import router as auth_router
@@ -46,10 +47,23 @@ db_manager = DatabaseManager()
 security = HTTPBearer(auto_error=False)  # Don't auto-error, handle manually
 SECRET_KEY = os.getenv("SECRET_KEY", "baby-ai-secret-key-change-in-production")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 240  # 4 hours instead of 30 minutes
+ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # 24 hours for testing
 
-# Rate limiting with Redis/Memory
-limiter = Limiter(key_func=get_remote_address)
+# Rate limiting with Redis/Memory - Disabled for development
+import os
+DEBUG_MODE = os.getenv("DEBUG", "true").lower() == "true"
+
+if DEBUG_MODE:
+    # Disable rate limiting in development
+    from slowapi import Limiter
+    class NoOpLimiter:
+        def limit(self, *args, **kwargs):
+            def decorator(func):
+                return func
+            return decorator
+    limiter = NoOpLimiter()
+else:
+    limiter = Limiter(key_func=get_remote_address)
 
 # Rate limiting store (fallback)
 _rate_limit_store = defaultdict(list)
@@ -59,7 +73,12 @@ def create_access_token(data: dict):
     """Create JWT access token"""
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire, "type": "access"})
+    to_encode.update({
+        "exp": expire, 
+        "type": "access",
+        "iss": "baby-ai-auth",  # Add issuer for compatibility
+        "iat": datetime.utcnow().timestamp()
+    })
     if "sub" in to_encode and isinstance(to_encode["sub"], int):
         to_encode["sub"] = str(to_encode["sub"])
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -69,20 +88,131 @@ def create_refresh_token(data: dict):
     """Create JWT refresh token"""
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(days=30)  # 30 days for refresh token
-    to_encode.update({"exp": expire, "type": "refresh"})
+    to_encode.update({
+        "exp": expire, 
+        "type": "refresh",
+        "iss": "baby-ai-auth",  # Add issuer for compatibility
+        "iat": datetime.utcnow().timestamp()
+    })
     if "sub" in to_encode and isinstance(to_encode["sub"], int):
         to_encode["sub"] = str(to_encode["sub"])
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
+def verify_token_optional_with_cookies(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Verify JWT token from cookies OR header - allow anonymous access"""
+    try:
+        token = None
+        
+        # Try to get token from httpOnly cookies first (secure auth)
+        if hasattr(request, 'cookies'):
+            token = request.cookies.get("access_token")
+            if token:
+                logger.info("✅ Found token in httpOnly cookie")
+        
+        # Fallback to Authorization header (legacy auth)
+        if not token and credentials and credentials.credentials:
+            token = credentials.credentials
+            logger.info("✅ Found token in Authorization header")
+        
+        if not token:
+            logger.warning("❌ No token provided, anonymous access")
+            return None  # Anonymous access
+            
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            logger.warning("Token has no 'sub' field")
+            return None
+            
+        # Validate user_id format
+        try:
+            user_id_int = int(user_id)
+            if user_id_int <= 0:
+                logger.warning(f"Invalid user_id in token: {user_id}")
+                return None
+        except ValueError:
+            logger.warning(f"Non-integer user_id in token: {user_id}")
+            return None
+            
+        logger.info(f"✅ Token verified successfully for user_id: {user_id_int}")
+        return user_id_int
+        
+    except ExpiredSignatureError:
+        logger.warning("❌ Token has expired")
+        return None
+    except PyJWTError as e:
+        logger.warning(f"❌ JWT decode error: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in token verification: {e}")
+        return None
+
+# Legacy function for backward compatibility
 def verify_token_optional(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Verify JWT token but allow anonymous access"""
+    """Legacy: Verify JWT token but allow anonymous access"""
     try:
         if not credentials or not credentials.credentials:
             logger.warning("No token provided, anonymous access")
             return None  # Anonymous access
             
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            logger.warning("Token has no 'sub' field")
+            return None
+            
+        # Validate user_id format
+        try:
+            user_id_int = int(user_id)
+            if user_id_int <= 0:
+                logger.warning(f"Invalid user_id in token: {user_id}")
+                return None
+        except ValueError:
+            logger.warning(f"Non-integer user_id in token: {user_id}")
+            return None
+            
+        logger.debug(f"Token verified successfully for user_id: {user_id_int}")
+        return user_id_int
+        
+    except ExpiredSignatureError:
+        logger.warning("Token has expired")
+        return None
+    except PyJWTError as e:
+        logger.warning(f"JWT decode error: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error in token verification: {e}")
+        return None
+
+def verify_token_from_request(request: Request) -> Optional[int]:
+    """Verify JWT token from httpOnly cookies OR authorization header"""
+    try:
+        token = None
+        
+        # DEBUG: Log all cookies and headers
+        logger.info(f"🔍 All cookies: {dict(request.cookies)}")
+        logger.info(f"🔍 Authorization header: {request.headers.get('Authorization', 'None')}")
+        
+        # Try to get token from httpOnly cookies first (secure auth)
+        token = request.cookies.get("access_token")
+        if token:
+            logger.info("✅ Found token in httpOnly cookie")
+        else:
+            logger.warning("❌ No access_token cookie found")
+            # Fallback to Authorization header (legacy auth)
+            auth_header = request.headers.get("Authorization")
+            if auth_header and auth_header.startswith("Bearer "):
+                token = auth_header[7:]  # Remove "Bearer " prefix
+                logger.info("✅ Found token in Authorization header")
+            else:
+                logger.warning("❌ No Authorization header found")
+        
+        if not token:
+            logger.warning("No token provided, anonymous access")
+            return None  # Anonymous access
+            
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
         if user_id is None:
             logger.warning("Token has no 'sub' field")
@@ -159,10 +289,11 @@ app = FastAPI(
 # Add enhanced security middleware
 app.middleware("http")(auth_middleware)
 
-# Add rate limiting
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-app.add_middleware(SlowAPIMiddleware)
+# Add rate limiting - only in production
+if not DEBUG_MODE:
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIMiddleware)
 
 # Include authentication router
 app.include_router(auth_router)
@@ -171,23 +302,16 @@ app.include_router(auth_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://localhost:5174", 
-        "http://localhost:5175",
-        "http://localhost:5176",
-        "http://localhost:5177",
-        "http://localhost:5178",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:5174",
-        "http://127.0.0.1:5175",
-        "http://127.0.0.1:5176",
-        "http://127.0.0.1:5177",
-        "http://127.0.0.1:5178"
+        "http://localhost:5173",  # Frontend (Vite default)
+        "http://127.0.0.1:5173",  # Frontend (Vite default)
+        "http://localhost:5174",  # Frontend (Vite alternative port)
+        "http://127.0.0.1:5174",  # Frontend (Vite alternative port)
+        "http://localhost:8000",  # Backend self-reference
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Application start time for uptime calculation
@@ -220,8 +344,18 @@ async def startup_event():
         global app_start_time
         app_start_time = time.time()
         logger.info("Starting Baby AI API...")
+        
+        # Initialize SQLAlchemy database for secure auth
+        sqlalchemy_initialized = init_sqlalchemy_db()
+        if sqlalchemy_initialized:
+            logger.info("SQLAlchemy database initialized successfully")
+        else:
+            logger.warning("SQLAlchemy database initialization failed")
+        
+        # Initialize legacy database manager
         await db_manager.initialize()
-        logger.info("Database initialized successfully")
+        logger.info("Legacy database initialized successfully")
+        
         logger.info("Baby AI API started successfully")
     except Exception as e:
         logger.error(f"Startup failed: {e}")
@@ -953,7 +1087,7 @@ async def test_endpoint():
 
 # Legacy Auth endpoints (for backward compatibility)
 @app.post("/auth/login")
-@limiter.limit("10/minute")  # Reduced rate limit, encourage new endpoint usage
+@limiter.limit("100/minute")  # Increased for development
 async def legacy_login(request: Request, login_data: dict):
     """Legacy login endpoint - maintained for backward compatibility"""
     logger.warning("Using legacy login endpoint - consider migrating to secure /auth/login")
@@ -1279,7 +1413,7 @@ async def update_profile():
 
 # Favorites endpoints
 @app.get("/favorites")
-async def get_favorites(page: int = 1, limit: int = 20, user_id: Optional[int] = Depends(verify_token_optional)):
+async def get_favorites(request: Request, page: int = 1, limit: int = 20, user_id: Optional[int] = Depends(verify_token_optional_with_cookies)):
     """Get user favorites with database"""
     try:
         if user_id is None:
@@ -1332,7 +1466,7 @@ async def get_favorites(page: int = 1, limit: int = 20, user_id: Optional[int] =
         raise HTTPException(status_code=500, detail="Failed to get favorites")
 
 @app.post("/favorites")
-async def add_favorite(favorite_data: FavoriteNameCreate, user_id: Optional[int] = Depends(verify_token_optional)):
+async def add_favorite(request: Request, favorite_data: FavoriteNameCreate, user_id: Optional[int] = Depends(verify_token_optional_with_cookies)):
     """Add name to favorites with plan-based limitations"""
     try:
         if user_id is None:
@@ -1398,7 +1532,7 @@ async def add_favorite(favorite_data: FavoriteNameCreate, user_id: Optional[int]
         raise HTTPException(status_code=500, detail="Failed to add favorite")
 
 @app.delete("/favorites/{favorite_id}")
-async def remove_favorite(favorite_id: int, user_id: Optional[int] = Depends(verify_token_optional)):
+async def remove_favorite(request: Request, favorite_id: int, user_id: Optional[int] = Depends(verify_token_optional_with_cookies)):
     """Remove name from favorites with database"""
     try:
         if user_id is None:

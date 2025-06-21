@@ -5,55 +5,128 @@ import { onAuthStateChanged } from '../services/authStateManager';
 
 const UserProfile = ({ user, onClose, onUpdate, onShowToast }) => {
   const [favorites, setFavorites] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('profile');
+  const [favoritesLoaded, setFavoritesLoaded] = useState(false);
+
+  // Reset favorites state when user changes
+  useEffect(() => {
+    if (user) {
+      // Reset favorites state for new user
+      setFavoritesLoaded(false);
+      setFavorites([]);
+      setError(null);
+      setLoading(false);
+    }
+  }, [user?.id]);
 
   useEffect(() => {
-    // Only load favorites if we have a valid user and the component is still mounted
-    if (user && user.id) {
+    // Only load favorites if we have a valid user, favorites tab is active, and not already loaded
+    if (user && user.id && activeTab === 'favorites' && !favoritesLoaded && !loading) {
       console.log('🔐 UserProfile: Loading favorites for user:', user.email);
       loadFavorites();
     } else if (!user) {
       console.log('🔐 UserProfile: No user provided, skipping favorites load');
     }
-  }, [user]);
+  }, [user, activeTab, favoritesLoaded, loading]);
 
-  // Monitor auth state changes
+  // Monitor auth state changes (with debouncing to prevent loops)
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged((currentUser) => {
-      if (!currentUser) {
-        // User signed out, close the profile modal
-        console.log('🔐 UserProfile: User signed out, closing profile');
-        onClose();
-      }
+    let timeout;
+    const unsubscribe = onAuthStateChanged((currentUser, previousUser) => {
+      console.log('🔐 UserProfile: Auth state change detected:', {
+        currentUser: currentUser ? `${currentUser.email} (ID: ${currentUser.id})` : 'null',
+        previousUser: previousUser ? `${previousUser.email} (ID: ${previousUser.id})` : 'null',
+        propUser: user ? `${user.email} (ID: ${user.id})` : 'null'
+      });
+      
+      // Clear previous timeout
+      if (timeout) clearTimeout(timeout);
+      
+      // Debounce auth state changes to prevent rapid firing
+      timeout = setTimeout(() => {
+        // In development, be more conservative about closing the profile
+        const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        
+        if (!currentUser && user) {
+          if (isDevelopment) {
+            // In development, don't close automatically - let user manually close
+            console.log('🔐 UserProfile: User signed out detected in development, but keeping profile open for debugging');
+            console.log('🔍 UserProfile: To manually close profile, user can click the close button');
+          } else {
+            // Only close if we previously had a user but now don't
+            console.log('🔐 UserProfile: User signed out detected, closing profile');
+            console.trace('🔍 UserProfile: Profile closing trace');
+            // Reset all state before closing
+            setFavoritesLoaded(false);
+            setFavorites([]);
+            setError(null);
+            setLoading(false);
+            onClose();
+          }
+        } else if (currentUser && !user) {
+          console.log('🔐 UserProfile: User signed in but no prop user, staying open');
+        } else if (currentUser && user && currentUser.id !== user.id) {
+          console.log('🔐 UserProfile: Different user detected, closing profile');
+          onClose();
+        } else {
+          console.log('🔐 UserProfile: Auth state change ignored (same user or both null)');
+        }
+      }, 500); // 500ms debounce
     });
 
-    return unsubscribe;
-  }, [onClose]);
+    return () => {
+      if (timeout) clearTimeout(timeout);
+      return unsubscribe();
+    };
+  }, [onClose, user]);
 
   const loadFavorites = async () => {
-    // Don't load favorites if user is not authenticated
-    if (!user) {
-      console.log('🔐 UserProfile: No user, skipping favorites load');
+    // Don't load favorites if user is not authenticated or already loading
+    if (!user || !user.id || loading) {
+      console.log('🔐 UserProfile: No user or already loading, skipping favorites load');
+      return;
+    }
+
+    // Prevent multiple simultaneous calls
+    if (favoritesLoaded) {
+      console.log('🔐 UserProfile: Favorites already loaded, skipping');
       return;
     }
 
     try {
       setLoading(true);
       setError(null);
-      const response = await apiService.getFavorites();
-      setFavorites(response.favorites || []);
-    } catch (err) {
-      // Handle 401 errors gracefully
-      if (err.status === 401) {
-        console.log('🔐 UserProfile: Authentication required for favorites');
-        onClose(); // Close profile on auth error
-        return;
-      }
       
-      setError('Favoriler yüklenirken hata oluştu');
-      console.error('Favorites loading error:', err);
+      console.log('📡 UserProfile: Fetching favorites for user:', user.email);
+      const response = await apiService.getFavorites();
+      
+      if (response && Array.isArray(response.favorites)) {
+        setFavorites(response.favorites);
+        setFavoritesLoaded(true);
+        console.log('✅ UserProfile: Loaded', response.favorites.length, 'favorites');
+      } else {
+        console.warn('⚠️ UserProfile: Invalid favorites response format');
+        setFavorites([]);
+        setFavoritesLoaded(true);
+      }
+    } catch (err) {
+      console.error('❌ UserProfile: Favorites loading error:', err);
+      
+      // Handle specific error cases
+      if (err.status === 401) {
+        console.log('🔐 UserProfile: Authentication error, but keeping profile open');
+        setError('Oturum süresi dolmuş olabilir. Lütfen yeniden giriş yapın.');
+        // Don't close the profile immediately - let user decide
+      } else if (err.status === 429) {
+        console.log('⏰ UserProfile: Rate limited, will retry later');
+        setError('Çok fazla istek gönderildi. Lütfen birkaç saniye bekleyin.');
+      } else if (err.status >= 500) {
+        setError('Sunucu hatası. Lütfen daha sonra tekrar deneyin.');
+      } else {
+        setError('Favoriler yüklenirken hata oluştu');
+      }
     } finally {
       setLoading(false);
     }
@@ -61,25 +134,30 @@ const UserProfile = ({ user, onClose, onUpdate, onShowToast }) => {
 
   const deleteFavorite = async (favoriteId) => {
     // Don't proceed if user is not authenticated
-    if (!user) {
+    if (!user || !user.id) {
       console.log('🔐 UserProfile: No user, skipping favorite delete');
       return;
     }
 
     try {
+      console.log('🗑️ UserProfile: Deleting favorite:', favoriteId);
       await apiService.deleteFavorite(favoriteId);
-      setFavorites(favorites.filter(fav => fav.id !== favoriteId));
+      const updatedFavorites = favorites.filter(fav => fav.id !== favoriteId);
+      setFavorites(updatedFavorites);
       onShowToast({ message: 'Favori isim kaldırıldı ✨', type: 'success' });
     } catch (err) {
-      // Handle 401 errors gracefully
-      if (err.status === 401) {
-        console.log('🔐 UserProfile: Authentication required for favorite delete');
-        onClose(); // Close profile on auth error
-        return;
-      }
+      console.error('❌ UserProfile: Delete favorite error:', err);
       
-      console.error('Delete favorite error:', err);
-      onShowToast({ message: 'Favori kaldırılırken hata oluştu', type: 'error' });
+      // Handle specific error cases
+      if (err.status === 401) {
+        console.log('🔐 UserProfile: Authentication error for delete');
+        onShowToast({ message: 'Oturum süresi dolmuş. Lütfen yeniden giriş yapın.', type: 'error' });
+        // Don't close the profile immediately
+      } else if (err.status === 429) {
+        onShowToast({ message: 'Çok fazla istek. Lütfen bekleyin.', type: 'error' });
+      } else {
+        onShowToast({ message: 'Favori kaldırılırken hata oluştu', type: 'error' });
+      }
     }
   };
 
@@ -278,7 +356,13 @@ const UserProfile = ({ user, onClose, onUpdate, onShowToast }) => {
         ].map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => {
+              setActiveTab(tab.id);
+              // Load favorites when favorites tab is clicked and not already loaded
+              if (tab.id === 'favorites' && user && user.id && !favoritesLoaded && !loading) {
+                loadFavorites();
+              }
+            }}
             className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-medium transition-all duration-300 flex-1 justify-center ${
               activeTab === tab.id
                 ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg transform scale-105'
@@ -421,10 +505,16 @@ const UserProfile = ({ user, onClose, onUpdate, onShowToast }) => {
                     </div>
                   </div>
                   <button
-                    onClick={loadFavorites}
+                    onClick={() => {
+                      setFavoritesLoaded(false);
+                      setError(null);
+                      loadFavorites();
+                    }}
                     className="bg-white/20 hover:bg-white/30 p-3 rounded-xl transition-all duration-300"
+                    disabled={loading}
+                    title="Favorileri yenile"
                   >
-                    <Star className="w-5 h-5" />
+                    <Star className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
                   </button>
                 </div>
               </div>

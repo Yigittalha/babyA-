@@ -52,71 +52,38 @@ class User(Base):
     is_admin = Column(Boolean, default=False, nullable=False, index=True)
     is_verified = Column(Boolean, default=False, nullable=False)
     
-    # Subscription information
-    subscription_status = Column(
-        SQLEnum(UserSubscriptionStatus), 
-        default=UserSubscriptionStatus.FREE, 
-        nullable=False,
-        index=True
-    )
-    premium_until = Column(DateTime, nullable=True, index=True)
-    subscription_plan_id = Column(Integer, ForeignKey("subscription_plans.id"), nullable=True)
+    # Subscription information (matching existing database schema)
+    subscription_type = Column(String(50), default="free", nullable=False, index=True)
+    subscription_expires = Column(DateTime, nullable=True, index=True)
     
-    # Account status
-    status = Column(
-        SQLEnum(UserStatus), 
-        default=UserStatus.ACTIVE, 
-        nullable=False,
-        index=True
-    )
+    # Status and permissions (simplified to match existing schema)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    is_admin = Column(Boolean, default=False, nullable=False, index=True)
+    is_verified = Column(Boolean, default=True, nullable=False)  # Default to True for existing users
     
-    # Security fields
-    failed_login_attempts = Column(Integer, default=0, nullable=False)
-    last_login_attempt = Column(DateTime, nullable=True)
-    account_locked_until = Column(DateTime, nullable=True)
-    password_changed_at = Column(DateTime, default=func.now(), nullable=False)
+    # Optional fields (will be null for existing users)
+    last_login = Column(DateTime, nullable=True)  # Use last_login instead of last_login_attempt to match existing
     
-    # Contact and preference fields
-    preferred_language = Column(String(10), default="turkish", nullable=False)
-    timezone = Column(String(50), default="Europe/Istanbul", nullable=False)
-    
-    # Usage tracking
-    total_name_generations = Column(Integer, default=0, nullable=False)
-    last_activity = Column(DateTime, default=func.now(), nullable=False, index=True)
-    
-    # Timestamps
+    # Timestamps (matching existing schema)
     created_at = Column(DateTime, default=func.now(), nullable=False, index=True)
-    updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
-    deleted_at = Column(DateTime, nullable=True, index=True)  # Soft delete
     
-    # Relationships
-    favorites = relationship("UserFavorite", back_populates="user", cascade="all, delete-orphan")
-    name_generations = relationship("NameGeneration", back_populates="user")
-    audit_logs = relationship("AuditLog", back_populates="user")
-    subscription_plan = relationship("SubscriptionPlan", back_populates="users")
-    user_sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
+    # Relationships (simplified for existing database)
+    # favorites = relationship("UserFavorite", back_populates="user", cascade="all, delete-orphan")
+    # name_generations = relationship("NameGeneration", back_populates="user")
+    # audit_logs = relationship("AuditLog", back_populates="user")
+    # user_sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
     
-    # Composite indexes for common queries
+    # Simplified indexes for existing schema
     __table_args__ = (
-        Index('idx_user_email_status', 'email', 'status'),
-        Index('idx_user_subscription_active', 'subscription_status', 'is_active'),
-        Index('idx_user_created_status', 'created_at', 'status'),
-        Index('idx_user_activity', 'last_activity', 'is_active'),
-        Index('idx_user_premium', 'premium_until', 'subscription_status'),
-        CheckConstraint('failed_login_attempts >= 0', name='check_failed_attempts_positive'),
-        CheckConstraint('total_name_generations >= 0', name='check_generations_positive'),
+        Index('idx_user_email_subscription', 'email', 'subscription_type'),
+        Index('idx_user_subscription_active', 'subscription_type', 'is_active'),
+        Index('idx_user_admin', 'is_admin'),
     )
     
     def is_premium_active(self) -> bool:
         """Check if user has active premium subscription"""
-        if self.subscription_status == UserSubscriptionStatus.ACTIVE:
-            return self.premium_until is None or self.premium_until > datetime.utcnow()
-        return False
-    
-    def is_account_locked(self) -> bool:
-        """Check if account is temporarily locked"""
-        if self.account_locked_until:
-            return self.account_locked_until > datetime.utcnow()
+        if self.subscription_type in ["standard", "premium"]:
+            return self.subscription_expires is None or self.subscription_expires > datetime.utcnow()
         return False
     
     @validates('email')

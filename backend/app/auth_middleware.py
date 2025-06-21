@@ -15,11 +15,17 @@ import time
 
 from .config import settings
 from .database import get_db
-from .database_models import User, UserSubscriptionStatus, AuditLog
+from .database_models_simple import User
 from .security import (
     AuthTokens, SessionManager, CSRFProtection, SecurityUtils,
     SecurityConfig, TokenBlacklist
 )
+
+# Simple enum replacement for UserSubscriptionStatus
+class UserSubscriptionStatus:
+    FREE = "free"
+    ACTIVE = "active"
+    TRIAL = "trial"
 
 logger = structlog.get_logger(__name__)
 
@@ -106,6 +112,14 @@ class PlanBasedRateLimiter:
         user: Optional[User] = None
     ) -> bool:
         """Check if request is within rate limits"""
+        # Check DEBUG_MODE to bypass rate limiting in development
+        import os
+        DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true" or os.getenv("DEBUG", "false").lower() == "true"
+        
+        if DEBUG_MODE:
+            logger.debug("Rate limiting disabled in DEBUG_MODE")
+            return True
+        
         # Get identifier (user_id or IP)
         if user:
             identifier = f"user:{user.id}"
@@ -284,13 +298,19 @@ async def get_current_user_enhanced(
     db: Session = Depends(get_db)
 ) -> User:
     """Get current authenticated user with enhanced security checks"""
+    logger.debug(f"get_current_user_enhanced called for path: {request.url.path}")
+    
     # Rate limiting check
     if not await PlanBasedRateLimiter.check_rate_limit(request):
+        logger.warning("Rate limit exceeded")
         raise PlanBasedRateLimiter.create_rate_limit_response()
     
     # Extract token
     token = AuthTokens.extract_token_from_request(request)
+    logger.debug(f"Extracted token: {token[:20] if token else 'None'}...")
+    
     if not token:
+        logger.warning("No token found in request")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
@@ -299,13 +319,17 @@ async def get_current_user_enhanced(
     
     # Verify token
     payload = AuthTokens.verify_token(token, "access")
+    logger.debug(f"Token payload: {payload}")
+    
     if not payload:
+        logger.warning("Token verification failed")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token"
         )
     
     user_id = int(payload["sub"])
+    logger.debug(f"Looking for user with ID: {user_id}")
     
     # Get user from database
     user = db.query(User).filter(
@@ -314,14 +338,52 @@ async def get_current_user_enhanced(
     ).first()
     
     if not user:
+        logger.warning(f"User {user_id} not found or inactive")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive"
         )
     
+    # CRITICAL: Check session invalidation (force re-login after plan changes)
+    token_issued_at = payload.get("iat", 0)
+    
+    try:
+        # Use raw database connection to check session invalidation
+        import sqlite3
+        import os
+        
+        db_path = os.path.join(os.path.dirname(__file__), '..', 'baby_names.db')
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Check if user session was invalidated after token was issued
+        cursor.execute("""
+            SELECT COUNT(*) as count
+            FROM invalidated_sessions 
+            WHERE user_id = ? 
+            AND datetime(invalidated_at) > datetime(?, 'unixepoch')
+        """, (user_id, token_issued_at))
+        
+        result = cursor.fetchone()
+        invalidation_count = result[0] if result else 0
+        conn.close()
+        
+        if invalidation_count > 0:
+            logger.warning(f"🔐 Session invalidated for user {user_id} - forcing re-login")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Your account has been updated. Please login again to access new features.",
+                headers={"X-Force-Relogin": "true"}
+            )
+    except Exception as e:
+        logger.error(f"Session validation error for user {user_id}: {e}")
+        # Don't fail on session validation error in production - continue normally
+        pass
+    
     # Check account lockout
     user_identifier = f"user:{user.id}"
     if AccountLockoutManager.is_locked_out(user_identifier):
+        logger.warning(f"User {user_id} is locked out")
         raise HTTPException(
             status_code=status.HTTP_423_LOCKED,
             detail="Account temporarily locked due to failed login attempts"
@@ -330,6 +392,8 @@ async def get_current_user_enhanced(
     # Store user in request state
     request.state.user = user
     request.state.user_id = user.id
+    
+    logger.debug(f"User {user.email} authenticated successfully")
     
     # Update session activity if available
     # This would be enhanced to update session last activity

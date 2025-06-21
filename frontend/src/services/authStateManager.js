@@ -84,20 +84,30 @@ class AuthStateManager {
    */
   async validateSessionInBackground(token, userData) {
     try {
-      // Wait a bit to avoid immediate validation conflicts
+      // Disable background validation in development to prevent issues
+      const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      if (isDevelopment) {
+        console.log('🚫 AuthStateManager: Background validation disabled in development');
+        return;
+      }
+      
+      // Wait longer to avoid immediate validation conflicts
       setTimeout(async () => {
         try {
+          console.log('🔍 AuthStateManager: Running background session validation...');
           const isValid = await this.validateSession(token, userData);
           if (!isValid) {
-            console.warn('Background session validation failed, but keeping session for user experience');
+            console.warn('🚨 AuthStateManager: Background session validation failed, but keeping session for user experience');
             // Don't clear session immediately, let user continue
+          } else {
+            console.log('✅ AuthStateManager: Background session validation passed');
           }
         } catch (error) {
-          console.warn('Background validation error (non-critical):', error);
+          console.warn('⚠️ AuthStateManager: Background validation error (non-critical):', error);
         }
-      }, 2000); // 2 second delay
+      }, 10000); // 10 second delay instead of 2 seconds
     } catch (error) {
-      console.warn('Background validation setup failed:', error);
+      console.warn('❌ AuthStateManager: Background validation setup failed:', error);
     }
   }
 
@@ -326,6 +336,9 @@ class AuthStateManager {
   clearAuthState() {
     console.log('🧹 AuthStateManager: Clearing authentication state...');
     
+    // Add stack trace to debug what's calling clearAuthState
+    console.trace('🔍 AuthStateManager: clearAuthState called from:');
+    
     // Clear memory
     const previousUser = this.currentUser;
     this.currentUser = null;
@@ -355,6 +368,7 @@ class AuthStateManager {
     this.isInitialized = true;
     
     // Notify listeners
+    console.log('📢 AuthStateManager: Notifying listeners of auth state change (user -> null)');
     this.notifyAuthListeners(null, previousUser);
   }
 
@@ -375,10 +389,20 @@ class AuthStateManager {
    * Handle storage changes (multi-tab sync)
    */
   handleStorageChange(event) {
+    // Disable storage sync in development to prevent conflicts
+    const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if (isDevelopment) {
+      console.log('🚫 AuthStateManager: Storage sync disabled in development');
+      return;
+    }
+    
     // Only handle our keys
     if (event.key === this.tokenKey || event.key === this.userKey) {
+      console.log('🔍 AuthStateManager: Storage change detected:', event.key, event.newValue ? 'updated' : 'removed');
+      
       if (event.newValue === null) {
         // Session cleared in another tab
+        console.log('🚨 AuthStateManager: Session cleared in another tab, updating auth state');
         this.setAuthState(null);
       } else if (event.key === this.userKey && event.newValue) {
         // User data changed in another tab
@@ -387,15 +411,16 @@ class AuthStateManager {
           
           // Check if different user
           if (this.currentUser?.id !== newUser.id) {
-            console.warn('Different user detected in another tab');
+            console.warn('🚨 AuthStateManager: Different user detected in another tab, clearing auth state');
             this.clearAuthState();
             window.location.reload();
           } else {
             // Same user, update state
+            console.log('✅ AuthStateManager: Same user detected, updating auth state');
             this.setAuthState(newUser);
           }
         } catch (error) {
-          console.error('Failed to parse user data from storage:', error);
+          console.error('❌ AuthStateManager: Failed to parse user data from storage:', error);
           this.clearAuthState();
         }
       }
@@ -407,13 +432,27 @@ class AuthStateManager {
    */
   async handleVisibilityChange() {
     if (document.visibilityState === 'visible' && this.currentUser) {
+      // Disable visibility validation in development
+      const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      if (isDevelopment) {
+        console.log('🚫 AuthStateManager: Visibility validation disabled in development');
+        return;
+      }
+      
       // Validate session when page becomes visible
       const token = localStorage.getItem(this.tokenKey);
       if (token) {
-        const isValid = await this.validateSession(token, this.currentUser);
-        if (!isValid) {
-          console.warn('Session invalid on visibility change');
-          this.clearAuthState();
+        try {
+          console.log('🔍 AuthStateManager: Validating session on visibility change...');
+          const isValid = await this.validateSession(token, this.currentUser);
+          if (!isValid) {
+            console.warn('🚨 AuthStateManager: Session invalid on visibility change, clearing auth state');
+            this.clearAuthState();
+          } else {
+            console.log('✅ AuthStateManager: Session valid on visibility change');
+          }
+        } catch (error) {
+          console.warn('⚠️ AuthStateManager: Visibility validation error:', error);
         }
       }
     }

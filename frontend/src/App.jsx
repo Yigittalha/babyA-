@@ -13,7 +13,7 @@ import TrendAnalysis from './components/TrendAnalysis';
 import PremiumUpgrade from './components/PremiumUpgrade';
 import AdminPanel from './components/AdminPanel';
 import AdminLogin from './components/AdminLogin';
-import { apiService, formatError, api } from './services/api';
+import { apiService, formatError, api, apiClient, axiosClient } from './services/api';
 import './index.css';
 import authStateManager, { onAuthStateChanged, signInWithEmailAndPassword, signOut, getCurrentUser } from './services/authStateManager';
 // Enhanced secure authentication system
@@ -92,11 +92,53 @@ function MainApp() {
     };
   }, []);
 
+  // Toast fonksiyonunu useEffect'ten önce tanımla
+  const showToast = useCallback(({ message, type = 'info', duration = 5000 }) => {
+    const id = Date.now();
+    const newToast = { id, message, type, duration };
+    
+    setToasts(prev => [...prev, newToast]);
+    
+    setTimeout(() => {
+      setToasts(prev => prev.filter(toast => toast.id !== id));
+    }, duration);
+  }, []);
+
+  // loadFavorites fonksiyonunu useEffect'ten önce tanımla - httpOnly cookies ile
+  const loadFavorites = useCallback(async (userId = null) => {
+    // userId parametresi varsa kullan, yoksa current user'ı kontrol et
+    if (!userId && (!user || !user.id)) {
+      console.log('🔐 App: loadFavorites - No valid user, skipping');
+      return;
+    }
+    
+    setFavoritesLoading(true);
+    try {
+      // Secure API client kullan - httpOnly cookies desteği ile
+      const response = await axiosClient.get('/auth/favorites');
+      setFavorites(response.favorites || response || []);
+      console.log('✅ Favoriler başarıyla yüklendi');
+    } catch (error) {
+      // Handle auth errors gracefully
+      if (error.status === 401) {
+        console.log('🔐 App: loadFavorites - Authentication required türkçe');
+        setFavorites([]);
+        return;
+      }
+      console.error('Favoriler yüklenemedi:', error);
+    } finally {
+      setFavoritesLoading(false);
+    }
+  }, [user]); // Sadece user değiştiğinde dependency
+
   // Enhanced authentication state monitoring with secure auth manager
   useEffect(() => {
     console.log('🔐 Setting up enhanced authentication monitoring...');
     
-    // Primary: Secure Auth Manager (httpOnly cookies, CSRF protection)
+    // Make showToast globally available for API error handling
+    window.showToast = showToast;
+    
+    // Primary: Secure Auth Manager (localStorage + Authorization headers)
     const secureUnsubscribe = secureAuthManager.onAuthStateChanged((currentUser, previousUser, eventType) => {
       console.log('🔄 Secure auth state changed:', {
         current: currentUser?.email || 'None',
@@ -149,32 +191,35 @@ function MainApp() {
         }, 100);
       }
     });
+
+    // Listen for auth events from enhanced token manager
+    const handleAuthLogout = (event) => {
+      if (event.detail?.reason === 'token_expired') {
+        showToast({
+          message: 'Your session has expired. Please login again.',
+          type: 'error',
+          duration: 5000
+        });
+      }
+    };
+
+    window.addEventListener('auth:logout', handleAuthLogout);
     
     // Cleanup subscriptions on unmount
     return () => {
       console.log('🧹 Cleaning up auth state listeners');
       secureUnsubscribe();
       legacyUnsubscribe();
+      window.removeEventListener('auth:logout', handleAuthLogout);
     };
   }, [loadFavorites, showToast]); // Dependencies for the effect
-
-  // Toast fonksiyonunu en başta tanımla
-  const showToast = useCallback(({ message, type = 'info', duration = 5000 }) => {
-    const id = Date.now();
-    const newToast = { id, message, type, duration };
-    
-    setToasts(prev => [...prev, newToast]);
-    
-    setTimeout(() => {
-      setToasts(prev => prev.filter(toast => toast.id !== id));
-    }, duration);
-  }, []);
 
   const loadOptions = async () => {
     try {
       setLoading(true);
       setError(null);
-      const data = await apiService.getOptions();
+      // Secure API client kullan
+      const data = await axiosClient.get('/options');
       setOptions(data);
     } catch (err) {
       console.error('Options loading error:', err);
@@ -186,32 +231,6 @@ function MainApp() {
       setLoading(false);
     }
   };
-
-  // checkAuthStatus fonksiyonu artık gerekli değil - AuthStateManager otomatik olarak hallediyor
-
-  const loadFavorites = useCallback(async (userId = null) => {
-    // userId parametresi varsa kullan, yoksa current user'ı kontrol et
-    if (!userId && (!user || !user.id)) {
-      console.log('🔐 App: loadFavorites - No valid user, skipping');
-      return;
-    }
-    
-    setFavoritesLoading(true);
-    try {
-      const response = await apiService.getFavorites();
-      setFavorites(response.favorites);
-    } catch (error) {
-      // Handle auth errors gracefully
-      if (error.status === 401) {
-        console.log('🔐 App: loadFavorites - Authentication required');
-        setFavorites([]);
-        return;
-      }
-      console.error('Favoriler yüklenemedi:', error);
-    } finally {
-      setFavoritesLoading(false);
-    }
-  }, [user]); // Sadece user değiştiğinde dependency
 
   const handleGenerateNames = async (formData) => {
     // Kullanıcı giriş yapmamışsa önce giriş yapmasını iste
@@ -237,7 +256,8 @@ function MainApp() {
         extra: `İsim sayısı: ${formData.count}` // count'u extra'ya ekle
       };
       
-      const response = await apiService.generateNames(backendRequest);
+      // Secure API client kullan
+      const response = await axiosClient.post('/generate', backendRequest);
       
       if (response.success && response.names) {
         setResults(response.names);
@@ -295,13 +315,14 @@ function MainApp() {
     }
 
     try {
-      await apiService.addFavorite(nameData);
+      // Secure API client kullan
+      await axiosClient.post('/auth/favorites', nameData);
       await loadFavorites(); // Favorileri yenile
       showToast({ message: `"${nameData.name}" favorilere eklendi! ❤️`, type: 'favorite' });
     } catch (error) {
       // Handle auth errors gracefully
       if (error.status === 401) {
-        console.log('🔐 App: handleAddToFavorites - Authentication required');
+        console.log('🔐 App: handleAddToFavorites - Authentication required türkçe');
         setShowAuthModal(true);
         return;
       }
@@ -317,13 +338,14 @@ function MainApp() {
     }
 
     try {
-      await apiService.deleteFavorite(favoriteId);
+      // Secure API client kullan
+      await axiosClient.delete(`/auth/favorites/${favoriteId}`);
       await loadFavorites(); // Favorileri yenile
       showToast({ message: 'Favori silindi', type: 'success' });
     } catch (error) {
       // Handle auth errors gracefully
       if (error.status === 401) {
-        console.log('🔐 App: handleRemoveFavorite - Authentication required');
+        console.log('🔐 App: handleRemoveFavorite - Authentication required türkçe');
         setShowFavorites(false);
         setShowAuthModal(true);
         return;
@@ -339,9 +361,9 @@ function MainApp() {
       
       // Try secure authentication first
       try {
-        const result = await secureAuthManager.signInWithEmailAndPassword(email, password, false, 'Web Browser');
+        const result = await secureAuthManager.signInWithEmailAndPassword(email, password);
         
-        if (result.success) {
+        if (result && result.user) {
           console.log('✅ handleAuthSuccess: Secure sign in successful');
           setShowAuthModal(false);
           
@@ -487,7 +509,8 @@ function MainApp() {
   const handleAnalyzeName = useCallback(async (name, language = 'turkish') => {
     try {
       setLoading(true);
-      const response = await apiService.analyzeName(name, language);
+      // Secure API client kullan
+      const response = await axiosClient.post('/analyze_name', { name, language });
       
       if (response.success) {
         setAnalysisName(name);

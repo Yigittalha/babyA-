@@ -1,26 +1,24 @@
 """
-Professional Security Module for Baby AI
-Comprehensive authentication, session management, and security utilities
+Enhanced Security Module for Baby AI Authentication
 """
 import os
-import jwt
 import secrets
-import hashlib
+import jwt
 import redis
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any, List, Tuple
-from fastapi import Request, HTTPException, status, Depends, Response
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from passlib.context import CryptContext
-import structlog
-from sqlalchemy.orm import Session
 import json
 import hmac
 import base64
+import time
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, Tuple, List
+from passlib.context import CryptContext
+from fastapi import Request, Response, HTTPException, status, Depends
+from sqlalchemy.orm import Session
+import structlog
 
 from .config import settings
 from .database import get_db
-from .database_models import User, UserSession, AuditLog
+from .database_models_simple import User
 
 logger = structlog.get_logger(__name__)
 
@@ -30,8 +28,6 @@ pwd_context = CryptContext(
     deprecated="auto",
     bcrypt__rounds=12  # Strong hashing
 )
-
-security = HTTPBearer(auto_error=False)
 
 # Redis connection for session management
 redis_client = None
@@ -65,8 +61,8 @@ class SecurityConfig:
     LOCKOUT_DURATION = timedelta(minutes=15)
     MAX_SESSIONS_PER_USER = 10
     
-    # Cookie configuration
-    COOKIE_SECURE = True  # HTTPS only
+    # Cookie configuration - Dynamic based on environment
+    COOKIE_SECURE = os.getenv("DEBUG_MODE", "false").lower() != "true"  # False in development, True in production
     COOKIE_HTTPONLY = True
     COOKIE_SAMESITE = "lax"
     
@@ -91,14 +87,18 @@ class AuthTokens:
         now = datetime.utcnow()
         expire = now + SecurityConfig.ACCESS_TOKEN_LIFETIME
         
+        # Use time.time() for JWT timestamps to avoid timezone issues
+        now_timestamp = time.time()
+        expire_timestamp = now_timestamp + SecurityConfig.ACCESS_TOKEN_LIFETIME.total_seconds()
+        
         payload = {
             "sub": str(user_id),
             "email": email,
             "subscription_type": subscription_type,
             "is_admin": bool(is_admin),
             "type": "access",
-            "iat": now.timestamp(),
-            "exp": expire.timestamp(),
+            "iat": now_timestamp,
+            "exp": expire_timestamp,
             "jti": secrets.token_urlsafe(32),  # Unique token ID for revocation
             "iss": "baby-ai-auth"  # Issuer
         }
@@ -117,12 +117,16 @@ class AuthTokens:
         now = datetime.utcnow()
         expire = now + SecurityConfig.REFRESH_TOKEN_LIFETIME
         
+        # Use time.time() for JWT timestamps to avoid timezone issues
+        now_timestamp = time.time()
+        expire_timestamp = now_timestamp + SecurityConfig.REFRESH_TOKEN_LIFETIME.total_seconds()
+        
         payload = {
             "sub": str(user_id),
             "session_id": session_id,
             "type": "refresh",
-            "iat": now.timestamp(),
-            "exp": expire.timestamp(),
+            "iat": now_timestamp,
+            "exp": expire_timestamp,
             "jti": secrets.token_urlsafe(32)
         }
         
@@ -252,7 +256,7 @@ class SessionManager:
         
         # Create tokens
         access_token = AuthTokens.create_access_token(
-            user.id, user.email, user.subscription_status.value, user.is_admin
+            user.id, user.email, user.subscription_type, user.is_admin
         )
         refresh_token = AuthTokens.create_refresh_token(user.id, session_id)
         
@@ -441,8 +445,24 @@ class SecurityUtils:
     
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
-        """Verify password against hash"""
-        return pwd_context.verify(plain_password, hashed_password)
+        """Verify password against hash - supports both bcrypt and legacy SHA256+salt"""
+        # Check if it's bcrypt format (starts with $2b$ or similar)
+        if hashed_password.startswith('$2b$') or hashed_password.startswith('$2a$') or hashed_password.startswith('$2y$'):
+            return pwd_context.verify(plain_password, hashed_password)
+        
+        # Handle legacy SHA256+salt format (salt$hash)
+        try:
+            if '$' in hashed_password:
+                salt, hash_value = hashed_password.split('$', 1)
+                # Recreate the hash using the original method
+                import hashlib
+                hash_obj = hashlib.sha256()
+                hash_obj.update((plain_password + salt).encode())
+                return hash_obj.hexdigest() == hash_value
+        except Exception as e:
+            logger.warning(f"Password verification error: {e}")
+        
+        return False
     
     @staticmethod
     def generate_secure_token(length: int = 32) -> str:
