@@ -96,4 +96,13 @@ coverage.xml
 # Database files
 *.db
 *.sqlite
-*.sqlite3 
+*.sqlite3 cookies*.txt
+*.cookie
+.env
+.env.local
+.env.production
+node_modules/
+__pycache__/
+*.pyc
+*.log
+.DS_Store
