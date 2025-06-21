@@ -15,6 +15,9 @@ import AdminPanel from './components/AdminPanel';
 import AdminLogin from './components/AdminLogin';
 import { apiService, formatError, api } from './services/api';
 import './index.css';
+import authStateManager, { onAuthStateChanged, signInWithEmailAndPassword, signOut, getCurrentUser } from './services/authStateManager';
+// SessionManager no longer needed - AuthStateManager handles everything
+import { checkAndCleanupIfNeeded } from './utils/sessionCleanup';
 
 // Ana uygulama component'i
 function MainApp() {
@@ -71,8 +74,18 @@ function MainApp() {
   useEffect(() => {
     loadOptions();
     
+    // Debug: Check session state before cleanup
+    console.log('🔍 Debug - Session state before cleanup:');
+    console.log('  Token:', localStorage.getItem('token') ? 'Present' : 'None');
+    console.log('  User data:', localStorage.getItem('baby_ai_user') || localStorage.getItem('user_data') ? 'Present' : 'None');
+    
+    // Temporarily disable strict session checks for stability
+    console.log('📝 Skipping strict session checks for now');
+    
     // Initialize subscription monitoring
     api.initSubscriptionMonitoring();
+    
+    // AuthStateManager handles all session management now
     
     // Cleanup on unmount
     return () => {
@@ -80,26 +93,63 @@ function MainApp() {
     };
   }, []);
 
-  // Kullanıcı durumunu kontrol et
+  // Firebase Auth benzeri authentication state monitoring
   useEffect(() => {
-    // Önce cache'lenmiş user data'sını yükle (hızlı render için)
-    const cachedUser = localStorage.getItem('user_data');
-    if (cachedUser) {
-      try {
-        const parsedUser = JSON.parse(cachedUser);
-        setUser(parsedUser);
-      } catch (e) {
-        console.error('Cached user data parse error:', e);
-        localStorage.removeItem('user_data');
-      }
-    }
-
-    // Token varsa fresh data al
-    const token = localStorage.getItem('token');
-    if (token) {
-      checkAuthStatus();
-    }
+    console.log('🔐 Setting up Firebase Auth-like authentication monitoring...');
+    
+    // Firebase Auth benzeri onAuthStateChanged
+    const unsubscribe = onAuthStateChanged((currentUser, previousUser) => {
+      console.log('🔄 Auth state changed:', {
+        current: currentUser?.email || 'None',
+        previous: previousUser?.email || 'None'
+      });
+      
+              if (currentUser) {
+          // User is signed in
+          console.log('✅ User authenticated:', currentUser.email);
+          setUser(currentUser);
+          
+          // Load user's favorites after a short delay to ensure token is set
+          setTimeout(() => {
+            loadFavorites(currentUser.id);
+          }, 100);
+          
+          // AuthStateManager handles everything now - no need for SessionManager sync
+          
+        } else {
+          // User is signed out
+          console.log('📝 User signed out');
+          setUser(null);
+          setFavorites([]);
+          
+          // Clear UI state
+          setShowProfile(false);
+          setShowFavorites(false);
+          setShowPremiumUpgrade(false);
+          setCurrentPage('generate');
+          
+          // AuthStateManager handles session clearing automatically
+        }
+    });
+    
+    // Cleanup subscription on unmount
+    return () => {
+      console.log('🧹 Cleaning up auth state listener');
+      unsubscribe();
+    };
   }, []); // Empty dependency array - sadece mount'ta çalışsın
+
+  // Toast fonksiyonunu en başta tanımla
+  const showToast = useCallback(({ message, type = 'info', duration = 5000 }) => {
+    const id = Date.now();
+    const newToast = { id, message, type, duration };
+    
+    setToasts(prev => [...prev, newToast]);
+    
+    setTimeout(() => {
+      setToasts(prev => prev.filter(toast => toast.id !== id));
+    }, duration);
+  }, []);
 
   const loadOptions = async () => {
     try {
@@ -118,47 +168,26 @@ function MainApp() {
     }
   };
 
-  const checkAuthStatus = useCallback(async () => {
-    try {
-      // Önce localStorage'dan cache'lenmiş user data'sını kontrol et
-      const cachedUser = localStorage.getItem('user_data');
-      if (cachedUser) {
-        try {
-          const parsedUser = JSON.parse(cachedUser);
-          setUser(parsedUser);
-        } catch (e) {
-          console.error('Cached user data parse error:', e);
-        }
-      }
-
-      // API'dan fresh data al
-      const userData = await apiService.getProfile();
-      setUser(userData);
-      
-      // User data'sını localStorage'a cache'le
-      localStorage.setItem('user_data', JSON.stringify(userData));
-      
-      // Sadece user data aldıktan sonra favorileri yükle
-      if (userData) {
-        loadFavorites(userData.id);
-      }
-    } catch (error) {
-      console.error('Auth check error:', error);
-      localStorage.removeItem('token');
-      localStorage.removeItem('user_data');
-      setUser(null);
-    }
-  }, []); // Empty dependencies
+  // checkAuthStatus fonksiyonu artık gerekli değil - AuthStateManager otomatik olarak hallediyor
 
   const loadFavorites = useCallback(async (userId = null) => {
     // userId parametresi varsa kullan, yoksa current user'ı kontrol et
-    if (!userId && !user) return;
+    if (!userId && (!user || !user.id)) {
+      console.log('🔐 App: loadFavorites - No valid user, skipping');
+      return;
+    }
     
     setFavoritesLoading(true);
     try {
       const response = await apiService.getFavorites();
       setFavorites(response.favorites);
     } catch (error) {
+      // Handle auth errors gracefully
+      if (error.status === 401) {
+        console.log('🔐 App: loadFavorites - Authentication required');
+        setFavorites([]);
+        return;
+      }
       console.error('Favoriler yüklenemedi:', error);
     } finally {
       setFavoritesLoading(false);
@@ -223,13 +252,25 @@ function MainApp() {
         message: formatError(err),
         originalError: err
       });
+      
+      // Error gösterildikten sonra scroll yap
+      setTimeout(() => {
+        const errorElement = document.querySelector('[data-error-display]');
+        if (errorElement) {
+          errorElement.scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'center' 
+          });
+        }
+      }, 100);
     } finally {
       setLoading(false);
     }
   };
 
   const handleAddToFavorites = async (nameData) => {
-    if (!user) {
+    if (!user || !user.id) {
+      console.log('🔐 App: handleAddToFavorites - No valid user');
       setShowAuthModal(true);
       return;
     }
@@ -239,40 +280,89 @@ function MainApp() {
       await loadFavorites(); // Favorileri yenile
       showToast({ message: `"${nameData.name}" favorilere eklendi! ❤️`, type: 'favorite' });
     } catch (error) {
+      // Handle auth errors gracefully
+      if (error.status === 401) {
+        console.log('🔐 App: handleAddToFavorites - Authentication required');
+        setShowAuthModal(true);
+        return;
+      }
       console.error('Favori eklenirken hata oluştu:', error);
       showToast({ message: 'Favori eklenirken hata oluştu', type: 'error' });
     }
   };
 
   const handleRemoveFavorite = async (favoriteId) => {
+    if (!user || !user.id) {
+      console.log('🔐 App: handleRemoveFavorite - No valid user');
+      return;
+    }
+
     try {
       await apiService.deleteFavorite(favoriteId);
       await loadFavorites(); // Favorileri yenile
       showToast({ message: 'Favori silindi', type: 'success' });
     } catch (error) {
+      // Handle auth errors gracefully
+      if (error.status === 401) {
+        console.log('🔐 App: handleRemoveFavorite - Authentication required');
+        setShowFavorites(false);
+        setShowAuthModal(true);
+        return;
+      }
       console.error('Favori silinirken hata oluştu:', error);
       showToast({ message: 'Favori silinirken hata oluştu', type: 'error' });
     }
   };
 
-  const handleAuthSuccess = useCallback((userData) => {
-    setUser(userData);
-    setShowAuthModal(false);
-    
-    // User data'sını cache'le
-    localStorage.setItem('user_data', JSON.stringify(userData));
-    
-    // userData'yı direkt kullan
-    if (userData) {
-      loadFavorites(userData.id);
+  const handleAuthSuccess = useCallback(async (email, password) => {
+    try {
+      console.log('🔐 handleAuthSuccess: Processing sign in for:', email);
+      
+      // Use Firebase Auth-like sign in
+      const result = await signInWithEmailAndPassword(email, password);
+      
+      if (result.success) {
+        console.log('✅ handleAuthSuccess: Sign in successful');
+        setShowAuthModal(false);
+        
+        // Show success message
+        showToast({ message: 'Başarıyla giriş yapıldı!', type: 'success' });
+        
+        // Auth state will be updated automatically via onAuthStateChanged
+        // User will be set and favorites will be loaded automatically
+        
+      } else {
+        throw new Error('Sign in failed');
+      }
+      
+    } catch (error) {
+      console.error('❌ handleAuthSuccess: Sign in failed:', error);
+      throw error; // Re-throw to let AuthModal handle the error
     }
-  }, [loadFavorites]);
+  }, [showToast]);
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user_data'); // Cache'i temizle
-    setUser(null);
-    setFavorites([]);
+  const handleLogout = async () => {
+    try {
+      console.log('🔐 handleLogout: Processing sign out...');
+      
+      // Use Firebase Auth-like sign out
+      await signOut();
+      
+      // Clear UI state
+      setCurrentPage('generate');
+      setShowProfile(false);
+      setShowFavorites(false);
+      
+      // Auth state will be cleared automatically via onAuthStateChanged
+      
+      console.log('✅ handleLogout: Sign out completed');
+      
+    } catch (error) {
+      console.error('❌ handleLogout: Sign out failed:', error);
+      // Even if signOut fails, clear local state
+      setUser(null);
+      setFavorites([]);
+    }
   };
 
   const handleShowPremiumUpgrade = () => {
@@ -329,17 +419,6 @@ function MainApp() {
       behavior: 'smooth'
     });
   };
-
-  const showToast = useCallback(({ message, type = 'info', duration = 5000 }) => {
-    const id = Date.now();
-    const newToast = { id, message, type, duration };
-    
-    setToasts(prev => [...prev, newToast]);
-    
-    setTimeout(() => {
-      setToasts(prev => prev.filter(toast => toast.id !== id));
-    }, duration);
-  }, []);
 
   const removeToast = useCallback((id) => {
     setToasts(prev => prev.filter(toast => toast.id !== id));
@@ -548,19 +627,36 @@ function MainApp() {
                   {user ? (
                     <button 
                       onClick={() => document.getElementById('name-form').scrollIntoView({ behavior: 'smooth' })}
-                      className="btn-hero"
+                      className="group relative bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 hover:from-purple-700 hover:via-pink-700 hover:to-blue-700 text-white px-12 py-6 rounded-2xl font-bold text-xl transition-all duration-300 transform hover:scale-105 shadow-xl hover:shadow-2xl"
                     >
-                      ✨ İsim Üretmeye Başla
+                      <div className="absolute inset-0 bg-gradient-to-r from-purple-400 via-pink-400 to-blue-400 rounded-2xl blur opacity-70 group-hover:opacity-100 transition-opacity"></div>
+                      <div className="relative flex items-center space-x-3">
+                        <span className="text-2xl">✨</span>
+                        <span>İsim Üretmeye Başla</span>
+                        <span className="text-2xl group-hover:animate-spin">🚀</span>
+                      </div>
+                      <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
                     </button>
                   ) : (
                     <button 
                       onClick={() => setShowAuthModal(true)}
-                      className="btn-hero"
+                      className="group relative bg-gradient-to-r from-green-600 via-emerald-600 to-teal-600 hover:from-green-700 hover:via-emerald-700 hover:to-teal-700 text-white px-12 py-6 rounded-2xl font-bold text-xl transition-all duration-300 transform hover:scale-105 shadow-xl hover:shadow-2xl"
                     >
-                      🚀 Ücretsiz Başla
+                      <div className="absolute inset-0 bg-gradient-to-r from-green-400 via-emerald-400 to-teal-400 rounded-2xl blur opacity-70 group-hover:opacity-100 transition-opacity"></div>
+                      <div className="relative flex items-center space-x-3">
+                        <span className="text-2xl">🚀</span>
+                        <span>Ücretsiz Başla</span>
+                        <span className="text-2xl group-hover:animate-bounce">💎</span>
+                      </div>
+                      <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
                     </button>
                   )}
-                  <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 text-2xl animate-bounce-gentle">👇</div>
+                  <div className="absolute -bottom-10 left-1/2 transform -translate-x-1/2 text-3xl animate-bounce-gentle">👇</div>
+                  
+                  {/* Floating particles */}
+                  <div className="absolute -top-4 -left-4 w-2 h-2 bg-yellow-400 rounded-full animate-ping"></div>
+                  <div className="absolute -top-6 right-8 w-1 h-1 bg-pink-400 rounded-full animate-pulse"></div>
+                  <div className="absolute -bottom-2 -right-6 w-3 h-3 bg-purple-400 rounded-full animate-bounce"></div>
                 </div>
               </div>
             </div>
@@ -721,14 +817,42 @@ function MainApp() {
             <div className="container mx-auto px-4 relative z-10">
               <div className="max-w-4xl mx-auto">
                 <div className="text-center mb-12 relative">
-                  <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 text-4xl opacity-20 animate-pulse">🎯</div>
-                  <h2 className="section-title text-gradient">
-                    İsim Üretmeye Başlayın
+                  <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 text-5xl opacity-30 animate-pulse">✨</div>
+                  <div className="absolute -top-6 left-1/4 text-3xl opacity-20 animate-bounce">🎯</div>
+                  <div className="absolute -top-4 right-1/4 text-2xl opacity-25 animate-float">⭐</div>
+                  
+                  <h2 className="text-5xl md:text-6xl font-bold mb-6">
+                    <span className="bg-gradient-to-r from-purple-600 via-pink-500 to-blue-600 bg-clip-text text-transparent">
+                      🚀 İsim Üret
+                    </span>
+                    <br />
+                    <span className="bg-gradient-to-r from-blue-600 via-purple-500 to-pink-600 bg-clip-text text-transparent text-4xl md:text-5xl">
+                      Hayalindeki İsmi Bul
+                    </span>
                   </h2>
-                  <p className="section-subtitle">
-                    Tercihlerinizi belirleyin ve hayalinizdeki bebek ismini keşfedin
-                  </p>
-                  <div className="absolute -bottom-2 right-1/4 text-2xl opacity-20 animate-bounce-gentle">🚀</div>
+                  
+                  <div className="max-w-3xl mx-auto mb-8">
+                    <p className="text-xl text-gray-600 mb-4">
+                      🎯 Tercihlerinizi belirleyin, yapay zeka size özel isimler üretsin
+                    </p>
+                    <div className="flex flex-wrap justify-center gap-6 text-sm">
+                      <div className="flex items-center space-x-2 bg-purple-50 px-4 py-2 rounded-full">
+                        <span className="text-purple-500">🎭</span>
+                        <span className="text-purple-700 font-medium">10 Tema</span>
+                      </div>
+                      <div className="flex items-center space-x-2 bg-blue-50 px-4 py-2 rounded-full">
+                        <span className="text-blue-500">🌍</span>
+                        <span className="text-blue-700 font-medium">6 Dil</span>
+                      </div>
+                      <div className="flex items-center space-x-2 bg-pink-50 px-4 py-2 rounded-full">
+                        <span className="text-pink-500">⚡</span>
+                        <span className="text-pink-700 font-medium">AI Destekli</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="absolute -bottom-6 right-1/3 text-3xl opacity-20 animate-bounce-gentle">🚀</div>
+                  <div className="absolute -bottom-4 left-1/3 text-2xl opacity-25 animate-pulse">💎</div>
                 </div>
 
                 {/* Trust Indicators */}
@@ -829,62 +953,69 @@ function MainApp() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="glass-effect sticky top-0 z-40 border-b border-white/20">
-        <div className="container mx-auto px-4 py-3">
-          <div className="flex items-center justify-between">
-            {/* Left Side - Logo */}
-              <div className="flex items-center space-x-3">
-              {/* Simple Cute Baby Logo */}
+      <header className="bg-white shadow-sm sticky top-0 z-40 border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            {/* Left Side - Tatlı Bebek Logosu */}
+            <div 
+              onClick={handleGoHome}
+              className="flex items-center space-x-3 cursor-pointer group transition-all duration-300"
+            >
               <div className="relative group">
-                {/* Cute Baby Face SVG - No container boxes */}
+                {/* Tatlı Bebek SVG Logosu */}
                 <svg 
-                  className="w-10 h-10 mobile-logo-svg text-gray-700 hover:text-purple-600 transition-colors duration-300 cursor-pointer" 
+                  className="w-12 h-12 text-gray-700 hover:text-purple-600 transition-colors duration-300 cursor-pointer group-hover:scale-110" 
                   viewBox="0 0 60 60" 
                   fill="none"
                 >
                   {/* Decorative stars around baby */}
-                  <circle cx="15" cy="15" r="1" fill="currentColor" className="opacity-40"/>
-                  <circle cx="45" cy="15" r="1" fill="currentColor" className="opacity-40"/>
-                  <circle cx="12" cy="35" r="0.8" fill="currentColor" className="opacity-30"/>
-                  <circle cx="48" cy="35" r="0.8" fill="currentColor" className="opacity-30"/>
+                  <circle cx="15" cy="15" r="1" fill="currentColor" className="opacity-40 animate-pulse"/>
+                  <circle cx="45" cy="15" r="1" fill="currentColor" className="opacity-40 animate-pulse" style={{animationDelay: '0.5s'}}/>
+                  <circle cx="12" cy="35" r="0.8" fill="currentColor" className="opacity-30 animate-pulse" style={{animationDelay: '1s'}}/>
+                  <circle cx="48" cy="35" r="0.8" fill="currentColor" className="opacity-30 animate-pulse" style={{animationDelay: '1.5s'}}/>
                   
                   {/* Baby face circle */}
-                  <circle cx="30" cy="30" r="12" stroke="currentColor" strokeWidth="2" fill="none"/>
+                  <circle cx="30" cy="30" r="12" stroke="currentColor" strokeWidth="2" fill="none" className="group-hover:stroke-pink-500 transition-colors"/>
                   
                   {/* Hair/curl on top */}
-                  <path d="M25 20 Q23 18 25 16 Q27 18 25 20" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                  <path d="M25 20 Q23 18 25 16 Q27 18 25 20" stroke="currentColor" strokeWidth="1.5" fill="none" className="group-hover:stroke-purple-500 transition-colors"/>
                   
                   {/* Eyes */}
-                  <circle cx="26" cy="27" r="1.5" fill="currentColor"/>
-                  <circle cx="34" cy="27" r="1.5" fill="currentColor"/>
+                  <circle cx="26" cy="27" r="1.5" fill="currentColor" className="group-hover:fill-blue-500 transition-colors"/>
+                  <circle cx="34" cy="27" r="1.5" fill="currentColor" className="group-hover:fill-blue-500 transition-colors"/>
                   
                   {/* Rosy cheeks */}
-                  <ellipse cx="22" cy="31" rx="2" ry="1.5" fill="#ff6b9d" opacity="0.6"/>
-                  <ellipse cx="38" cy="31" rx="2" ry="1.5" fill="#ff6b9d" opacity="0.6"/>
+                  <ellipse cx="22" cy="31" rx="2" ry="1.5" fill="#ff6b9d" opacity="0.6" className="group-hover:opacity-80 transition-opacity"/>
+                  <ellipse cx="38" cy="31" rx="2" ry="1.5" fill="#ff6b9d" opacity="0.6" className="group-hover:opacity-80 transition-opacity"/>
                   
                   {/* Smile */}
-                  <path d="M26 33 Q30 36 34 33" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
+                  <path d="M26 33 Q30 36 34 33" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" className="group-hover:stroke-pink-500 transition-colors"/>
                   
                   {/* Small decorative elements */}
-                  <circle cx="18" cy="22" r="0.5" fill="currentColor" className="opacity-30"/>
-                  <circle cx="42" cy="38" r="0.5" fill="currentColor" className="opacity-30"/>
+                  <circle cx="18" cy="22" r="0.5" fill="currentColor" className="opacity-30 animate-bounce"/>
+                  <circle cx="42" cy="38" r="0.5" fill="currentColor" className="opacity-30 animate-bounce" style={{animationDelay: '0.5s'}}/>
                 </svg>
+                
+                {/* Yıldız efekti */}
+                <div className="absolute -top-1 -right-1 w-4 h-4 bg-yellow-400 rounded-full animate-pulse flex items-center justify-center">
+                  <span className="text-xs">✨</span>
                 </div>
+              </div>
               
               {/* Brand Typography */}
               <div className="flex flex-col">
-                <h1 className="text-2xl mobile-brand-title font-bold bg-gradient-to-r from-gray-800 via-purple-700 to-blue-600 bg-clip-text text-transparent mobile-text-lg leading-tight">
+                <h1 className="text-2xl font-bold bg-gradient-to-r from-gray-800 via-purple-700 to-blue-600 bg-clip-text text-transparent leading-tight">
                   Baby <span className="text-pink-500">AI</span>
                 </h1>
-                <p className="text-xs mobile-brand-subtitle text-gray-500 font-medium -mt-1">
+                <p className="text-xs text-gray-500 font-medium -mt-1">
                   Baby name creator
                 </p>
               </div>
             </div>
             
-            {/* Center - Main Navigation */}
+            {/* Center - Ana Navigasyon Menüsü */}
             <nav className="hidden md:flex items-center space-x-8">
               <button
                 onClick={() => setCurrentPage('generate')}
@@ -920,7 +1051,7 @@ function MainApp() {
             <div className="flex items-center space-x-3">
               {/* Desktop User Actions */}
               <div className="hidden md:flex items-center">
-            {headerButtons}
+                {headerButtons}
               </div>
               
               {/* Mobile Menu */}
@@ -1062,17 +1193,111 @@ function MainApp() {
               </div>
             </div>
           </div>
+
+          {/* Mobile Menu */}
+          {showMobileMenu && (
+            <div className="md:hidden mobile-menu-container bg-white border-t py-4">
+              <div className="flex flex-col space-y-3">
+                {!user ? (
+                  <>
+                    {currentPage === 'results' && (
+                      <button
+                        onClick={() => {
+                          handleBackToGenerate();
+                          setShowMobileMenu(false);
+                        }}
+                        className="flex items-center px-4 py-2 rounded-lg bg-gray-50 text-gray-600 hover:bg-purple-100 hover:text-purple-600 transition-colors"
+                      >
+                        <Baby className="w-5 h-5 mr-3" />
+                        Yeni İsim Üret
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setShowAuthModal(true);
+                        setShowMobileMenu(false);
+                      }}
+                      className="flex items-center px-4 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+                    >
+                      <User className="w-5 h-5 mr-3" />
+                      Giriş Yap
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {currentPage === 'results' && (
+                      <button
+                        onClick={() => {
+                          handleBackToGenerate();
+                          setShowMobileMenu(false);
+                        }}
+                        className="flex items-center px-4 py-2 rounded-lg bg-gray-50 text-gray-600 hover:bg-purple-100 hover:text-purple-600 transition-colors"
+                      >
+                        <Baby className="w-5 h-5 mr-3" />
+                        Yeni İsim Üret
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setShowFavorites(true);
+                        setShowMobileMenu(false);
+                      }}
+                      className="flex items-center px-4 py-2 rounded-lg bg-pink-50 text-pink-600 hover:bg-pink-100 transition-colors"
+                    >
+                      <Heart className="w-5 h-5 mr-3" />
+                      Favoriler
+                    </button>
+                    {user && !user.is_premium && (
+                      <button
+                        onClick={() => {
+                          handleShowPremiumUpgrade();
+                          setShowMobileMenu(false);
+                        }}
+                        className="flex items-center px-4 py-2 rounded-lg bg-yellow-50 text-yellow-600 hover:bg-yellow-100 transition-colors"
+                      >
+                        <Crown className="w-5 h-5 mr-3" />
+                        Premium
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setShowProfile(true);
+                        setShowMobileMenu(false);
+                      }}
+                      className="flex items-center px-4 py-2 rounded-lg bg-gray-50 text-gray-600 hover:bg-gray-100 transition-colors"
+                    >
+                      <Settings className="w-5 h-5 mr-3" />
+                      Profil
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleLogout();
+                        setShowMobileMenu(false);
+                      }}
+                      className="flex items-center px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
+                    >
+                      <LogOut className="w-5 h-5 mr-3" />
+                      Çıkış
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </header>
 
       {/* Main Content */}
-      {mainContent}
+      <main className="flex-1">
+        {mainContent}
+      </main>
 
       {/* Error Display */}
       {error && (
         <ErrorDisplay 
           error={error} 
-          onClose={() => setError(null)} 
+          onClose={() => setError(null)}
+          onPremiumUpgrade={handleShowPremiumUpgrade}
         />
       )}
 
@@ -1092,17 +1317,12 @@ function MainApp() {
       {showAuthModal && (
         <AuthModal
           onClose={() => setShowAuthModal(false)}
-          onSuccess={(userData) => {
-            setUser(userData);
-            setShowAuthModal(false);
-            loadFavorites();
-            showToast({ message: 'Başarıyla giriş yapıldı!', type: 'success' });
-          }}
+          onSuccess={handleAuthSuccess}
           onShowToast={showToast}
         />
       )}
 
-      {showProfile && user && (
+      {showProfile && user && user.id && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
@@ -1129,7 +1349,7 @@ function MainApp() {
         </div>
       )}
 
-      {showFavorites && (
+      {showFavorites && user && user.id && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
@@ -1315,6 +1535,23 @@ function AdminDashboard() {
   const navigate = useNavigate();
   const [adminUser, setAdminUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [toasts, setToasts] = useState([]);
+
+  // Toast function for AdminDashboard
+  const showToast = useCallback(({ message, type = 'info', duration = 5000 }) => {
+    const id = Date.now();
+    const newToast = { id, message, type, duration };
+    
+    setToasts(prev => [...prev, newToast]);
+    
+    setTimeout(() => {
+      setToasts(prev => prev.filter(toast => toast.id !== id));
+    }, duration);
+  }, []);
+
+  const removeToast = useCallback((id) => {
+    setToasts(prev => prev.filter(toast => toast.id !== id));
+  }, []);
 
   useEffect(() => {
     checkAdminAuth();
@@ -1387,7 +1624,19 @@ function AdminDashboard() {
       </header>
       
       {/* Admin Panel */}
-      <AdminPanel />
+      <AdminPanel onShowToast={showToast} />
+      
+      {/* Toast Notifications */}
+      <div className="fixed bottom-4 right-4 z-50 space-y-2">
+        {toasts.map(toast => (
+          <Toast
+            key={toast.id}
+            message={toast.message}
+            type={toast.type}
+            onClose={() => removeToast(toast.id)}
+          />
+        ))}
+      </div>
     </div>
   );
 }

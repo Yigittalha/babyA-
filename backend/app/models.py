@@ -248,3 +248,61 @@ class HealthResponse(BaseModel):
     status: str = Field(..., description="Servis durumu")
     timestamp: datetime = Field(..., description="Kontrol zamanı")
     version: str = Field(..., description="API versiyonu") 
+
+# NEW: Plan System Constants
+class PlanType(str, Enum):
+    FREE = "free"
+    STANDARD = "standard"
+    PREMIUM = "premium"
+
+# Plan configuration with immutable IDs
+PLAN_CONFIG = {
+    PlanType.FREE: {
+        "id": "free",
+        "name": "Free Family",
+        "display_name": {"en": "Free Family", "tr": "Ücretsiz Aile"},
+        "price": 0.00,
+        "currency": "USD",
+        "features": {
+            "max_daily_generations": 5,
+            "max_favorites": 3,
+            "has_advanced_features": False,
+            "has_analytics": False,
+            "has_priority_support": False,
+            "has_cultural_insights": False,
+            "has_pdf_export": False
+        }
+    },
+    PlanType.STANDARD: {
+        "id": "standard", 
+        "name": "Standard Family",
+        "display_name": {"en": "Standard Family", "tr": "Standart Aile"},
+        "price": 4.99,
+        "currency": "USD",
+        "features": {
+            "max_daily_generations": 50,
+            "max_favorites": 20,
+            "has_advanced_features": True,
+            "has_analytics": False,
+            "has_priority_support": False,
+            "has_cultural_insights": True,
+            "has_pdf_export": False
+        }
+    },
+    PlanType.PREMIUM: {
+        "id": "premium",
+        "name": "Premium Family", 
+        "display_name": {"en": "Premium Family", "tr": "Premium Aile"},
+        "price": 8.99,
+        "currency": "USD",
+        "features": {
+            "max_daily_generations": None,  # Unlimited
+            "max_favorites": None,  # Unlimited
+            "has_advanced_features": True,
+            "has_analytics": True,
+            "has_priority_support": True,
+            "has_cultural_insights": True,
+            "has_pdf_export": True
+        }
+    }
+} 

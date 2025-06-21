@@ -31,49 +31,91 @@ const PremiumUpgrade = ({ onClose, onUpgrade }) => {
         getSubscriptionStatus()
       ]);
       
-      // Mock plans - realistic plans in USD
-      const mockPlans = [
-        {
-          id: 'premium_monthly',
-          type: 'premium',
-          name: 'Premium Monthly',
-          price: 19.99,
-          originalPrice: 29.99,
-          duration_days: 30,
-          features: [
-            'Unlimited name suggestions',
-            'Detailed name analysis',
-            'Cultural context info',
-            'Popularity predictions',
-            'Similar names',
-            'Unlimited favorites',
-            'Trend analysis',
-            'Email support'
-          ]
-        },
-        {
-          id: 'premium_yearly',
-          type: 'premium_yearly',
-          name: 'Premium Yearly',
-          price: 199.99,
-          originalPrice: 359.99,
-          duration_days: 365,
-          discount: '45% Discount',
-          features: [
-            'Unlimited name suggestions',
-            'Detailed name analysis',
-            'Cultural context info',
-            'Popularity predictions',
-            'Similar names',
-            'Unlimited favorites',
-            'Trend analysis',
-            'Priority email support',
-            '2 months free'
-          ]
-        }
-      ];
+      // NEW: Use real plans from backend API
+      try {
+        setPlans(plansResponse.plans || []);
+      } catch (planError) {
+        console.warn('Using fallback plans:', planError);
+        
+        // Fallback to new realistic plans if API fails
+        const newRealisticPlans = [
+          {
+            id: 'free',
+            type: 'free',
+            name: 'Free Family',
+            price: 0.00,
+            duration_days: 30,
+            popular: false,
+            features: [
+              '5 isim önerisi/gün',
+              'Temel anlam ve köken',
+              '3 favori limiti',
+              'Temel trend görünümü',
+              'Topluluk desteği'
+            ],
+            limitations: [
+              'Günlük üretim limiti',
+              'Sınırlı favoriler',
+              'Gelişmiş analiz yok',
+              'PDF eksport yok',
+              'Kültürel içgörü yok'
+            ]
+          },
+          {
+            id: 'standard',
+            type: 'standard',
+            name: 'Standard Family',
+            price: 4.99,
+            originalPrice: 7.99,
+            duration_days: 30,
+            popular: false,
+            yearlyPrice: 49.99,
+            yearlyDiscount: '17% İNDİRİM',
+            features: [
+              '50 isim üretimi/gün',
+              'Detaylı anlam ve köken',
+              '20 favori limiti',
+              'Gelişmiş trend görünümü',
+              'Kültürel içgörüler',
+              'İsim analiz raporları',
+              'E-posta desteği'
+            ],
+            limitations: [
+              'Günlük üretim limiti',
+              'Sınırlı favoriler',
+              'PDF eksport yok',
+              'Öncelikli destek yok'
+            ]
+          },
+          {
+            id: 'premium',
+            type: 'premium',
+            name: 'Premium Family',
+            price: 8.99,
+            originalPrice: 12.99,
+            duration_days: 30,
+            popular: true,
+            yearlyPrice: 89.99,
+            yearlyDiscount: '17% İNDİRİM',
+            features: [
+              'SİNİRSİZ isim üretimi',
+              'AI destekli kültürel içgörüler',
+              'Detaylı isim analizi',
+              'Sınırsız favoriler',
+              'PDF rapor eksportu',
+              'Gelişmiş trend analizi',
+              'İsim uyumluluk kontrolü',
+              'Kişiselleştirilmiş öneriler',
+              'Öncelikli destek',
+              'Aile isimlendirme danışmanlığı'
+            ],
+            limitations: []
+          }
+        ];
+        
+        setPlans(newRealisticPlans);
+      }
       
-      setPlans(mockPlans);
       setCurrentStatus(statusResponse);
     } catch (error) {
       console.error('Premium data fetch error:', error);
@@ -396,7 +438,7 @@ const PremiumUpgrade = ({ onClose, onUpgrade }) => {
                            }`}
                          >
                            <div className="w-8 h-8 mx-auto mb-3 bg-gradient-to-r from-green-500 to-emerald-500 rounded-lg text-white flex items-center justify-center">
-                             <span className="text-sm font-bold">₺</span>
+                             <span className="text-sm font-bold">$</span>
                            </div>
                            <div className="text-center">
                              <span className="block text-sm font-bold text-gray-800">Banka Transferi</span>

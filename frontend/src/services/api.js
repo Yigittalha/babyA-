@@ -7,10 +7,11 @@ import axios from 'axios';
 // API base URL
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-// Token management with proactive refresh
+// Token management with proactive refresh - Compatible with AuthStateManager
 class TokenManager {
   constructor() {
-    this.accessToken = localStorage.getItem('access_token');
+    // Use AuthStateManager compatible keys
+    this.accessToken = localStorage.getItem('baby_ai_token') || localStorage.getItem('token');
     this.refreshToken = localStorage.getItem('refresh_token');
     this.tokenRefreshPromise = null;
     this.refreshTimer = null;
@@ -23,7 +24,10 @@ class TokenManager {
   setTokens(accessToken, refreshToken) {
     this.accessToken = accessToken;
     this.refreshToken = refreshToken;
-    localStorage.setItem('access_token', accessToken);
+    
+    // Store with both keys for compatibility
+    localStorage.setItem('baby_ai_token', accessToken);
+    localStorage.setItem('token', accessToken); // Legacy compatibility
     localStorage.setItem('refresh_token', refreshToken);
     
     // Schedule proactive refresh
@@ -33,7 +37,10 @@ class TokenManager {
   clearTokens() {
     this.accessToken = null;
     this.refreshToken = null;
-    localStorage.removeItem('access_token');
+    
+    // Clear both token keys
+    localStorage.removeItem('baby_ai_token');
+    localStorage.removeItem('token'); // Legacy compatibility
     localStorage.removeItem('refresh_token');
     
     // Clear scheduled refresh
@@ -44,7 +51,8 @@ class TokenManager {
   }
 
   getAccessToken() {
-    return this.accessToken;
+    // Try AuthStateManager key first, then legacy
+    return localStorage.getItem('baby_ai_token') || localStorage.getItem('token');
   }
 
   hasValidTokens() {
@@ -226,8 +234,14 @@ class APIClient {
       ...options.headers,
     };
 
-    // Add auth header if available
-    const accessToken = tokenManager.getAccessToken();
+    // Add auth header if available - check multiple token sources for compatibility
+    let accessToken = tokenManager.getAccessToken();
+    
+    // Fallback to AuthStateManager token keys for compatibility
+    if (!accessToken) {
+      accessToken = localStorage.getItem('baby_ai_token') || localStorage.getItem('token');
+    }
+    
     if (accessToken) {
       headers.Authorization = `Bearer ${accessToken}`;
     }
@@ -247,13 +261,27 @@ class APIClient {
       if (response.status === 401 && accessToken && !url.includes('/auth/')) {
         try {
           await tokenManager.refreshAccessToken();
-          // Retry with new token
-          headers.Authorization = `Bearer ${tokenManager.getAccessToken()}`;
-          response = await fetch(fullUrl, { ...requestOptions, headers });
+          // Retry with new token - check multiple sources again
+          let newToken = tokenManager.getAccessToken();
+          if (!newToken) {
+            newToken = localStorage.getItem('baby_ai_token') || localStorage.getItem('token');
+          }
+          
+          if (newToken) {
+            headers.Authorization = `Bearer ${newToken}`;
+            response = await fetch(fullUrl, { ...requestOptions, headers });
+          } else {
+            throw new Error('No token available after refresh');
+          }
         } catch (refreshError) {
-          // Refresh failed, redirect to login
+          // Refresh failed, clear all tokens and redirect to login
           tokenManager.clearTokens();
-          window.location.href = '/login';
+          localStorage.removeItem('baby_ai_token');
+          localStorage.removeItem('token');
+          localStorage.removeItem('baby_ai_user');
+          localStorage.removeItem('user_data');
+          
+          // Don't redirect immediately, let auth state manager handle it
           throw new APIError('Authentication failed', 401, 'AUTH_FAILED');
         }
       }
@@ -653,7 +681,59 @@ export const api = {
   },
 
   async updateUserStatus(userId, status) {
-    return apiClient.patch(`/admin/users/${userId}`, { status });
+    return apiClient.put(`/admin/users/${userId}/status`, { status });
+  },
+
+  // NEW: Advanced Admin Analytics APIs
+  async getRevenueAnalytics(days = 30) {
+    return apiClient.get('/admin/analytics/revenue', { days });
+  },
+
+  async getActivityAnalytics(days = 30) {
+    return apiClient.get('/admin/analytics/activity', { days });
+  },
+
+  async getConversionAnalytics(days = 30) {
+    return apiClient.get('/admin/analytics/conversion', { days });
+  },
+
+  async getPlanAnalytics() {
+    return apiClient.get('/admin/analytics/plans');
+  },
+
+  // NEW: User Search API
+  async searchUsers(query, page = 1, limit = 20) {
+    return apiClient.get('/admin/users/search', { query, page, limit });
+  },
+
+  // NEW: Multi-Plan Subscription APIs
+  async getUserActivePlans(userId) {
+    return apiClient.get(`/admin/users/${userId}/plans`);
+  },
+
+  async assignMultiplePlans(userId, planNames) {
+    return apiClient.put(`/admin/users/${userId}/plans`, { plan_names: planNames });
+  },
+
+  // Enhanced existing admin APIs
+  async deleteUser(userId) {
+    return apiClient.delete(`/admin/users/${userId}`);
+  },
+
+  async updateUserSubscription(userId, subscriptionData) {
+    return apiClient.put(`/admin/users/${userId}/subscription`, subscriptionData);
+  },
+
+  async getAdminStats() {
+    return apiClient.get('/admin/stats');
+  },
+
+  async getAdminFavorites(page = 1, limit = 20) {
+    return apiClient.get('/admin/favorites', { page, limit });
+  },
+
+  async getAdminSystem() {
+    return apiClient.get('/admin/system');
   },
 
   // Settings and preferences
@@ -774,8 +854,8 @@ export const connectionStatus = {
 // Initialize connection monitoring
 connectionStatus.startMonitoring();
 
-// Export token manager for external use
-export { tokenManager };
+// Export token manager and apiClient for external use
+export { tokenManager, apiClient };
 
 // Default export
 export default api;
@@ -890,17 +970,111 @@ export class NetworkError extends Error {
   }
 }
 
-// Yardımcı fonksiyonlar
+// Kullanıcı dostu hata mesajları
 export const formatError = (error) => {
+  // Önce kullanıcı mesajını kontrol et
   if (error.userMessage) {
     return error.userMessage;
   }
   
+  // Hata mesajını al (API response veya error message)
+  let errorMessage = '';
   if (error.response?.data?.error) {
-    return error.response.data.error;
+    errorMessage = error.response.data.error;
+  } else if (error.response?.data?.message) {
+    errorMessage = error.response.data.message;
+  } else if (error.message) {
+    errorMessage = error.message;
   }
   
-  return 'Beklenmeyen bir hata oluştu.';
+  // Özel hata türleri için kullanıcı dostu mesajlar
+  if (errorMessage.includes('Daily limit reached') || errorMessage.includes('5/5 name generations')) {
+    return `🚀 Günlük İsim Limitiniz Doldu! 
+
+📊 Bugün 5 isim ürettiniz (Ücretsiz Plan)
+⏰ Yarın tekrar 5 isim üretebilirsiniz
+✨ Sınırsız isim için Premium'a geçin!
+
+💡 Ne yapabilirsiniz:
+• Favorilerinizi kontrol edin
+• Mevcut isimleri analiz edin  
+• Premium'a geçin (Sadece ₺7.99/ay)`;
+  }
+  
+  if (errorMessage.includes('Premium required') || errorMessage.includes('premium üyelik')) {
+    return `👑 Bu Özellik Premium Üyeler İçin!
+
+🎯 Premium avantajları:
+• Sınırsız isim üretimi
+• Özel isim önerileri
+• Detaylı analiz raporları
+• Öncelikli destek
+
+💸 Sadece $7.99/ay - İlk 7 gün ücretsiz!`;
+  }
+  
+  if (errorMessage.includes('Network') || errorMessage.includes('connection')) {
+    return `🌐 İnternet Bağlantı Sorunu!
+
+🔧 Lütfen şunları kontrol edin:
+• İnternet bağlantınız aktif mi?
+• Sayfayı yenilemeyi deneyin
+• Birkaç saniye sonra tekrar deneyin
+
+📞 Sorun devam ederse destek@babyai.com'a yazın`;
+  }
+  
+  if (errorMessage.includes('401') || errorMessage.includes('Authentication')) {
+    return `🔐 Oturum Süreniz Dolmuş!
+
+🔄 Lütfen tekrar giriş yapın:
+• Güvenliğiniz için oturumunuz sonlandı
+• Kullanıcı adı ve şifrenizle giriş yapın
+• Beni hatırla seçeneğini işaretleyin`;
+  }
+  
+  if (errorMessage.includes('500') || errorMessage.includes('server error')) {
+    return `⚙️ Sunucu Hatası!
+
+🛠️ Sistemimizde geçici bir sorun var:
+• Birkaç dakika sonra tekrar deneyin
+• Sorun bizde, sizde değil
+• Teknik ekibimiz durumdan haberdar
+
+⏰ Genellikle 2-3 dakikada düzelir`;
+  }
+  
+  if (errorMessage.includes('Too many requests')) {
+    return `⚡ Çok Hızlı İstek Gönderiyorsunuz!
+
+⏱️ Lütfen biraz bekleyin:
+• 1-2 dakika sonra tekrar deneyin
+• Bu koruma mekanizması sistemi güvende tutar
+• Premium üyeler daha yüksek limite sahiptir`;
+  }
+  
+  // Genel hata durumu
+  if (errorMessage) {
+    return `❌ Bir Sorun Oluştu!
+
+🔍 Hata detayı: ${errorMessage}
+
+💡 Çözüm önerileri:
+• Sayfayı yenileyin
+• Birkaç saniye bekleyip tekrar deneyin
+• Tarayıcı önbelleğini temizleyin
+
+📧 Destek: help@babyai.com`;
+  }
+  
+  return `🤔 Beklenmeyen Bir Durum!
+
+🔄 Deneyebilecekleriniz:
+• Sayfayı yenileyin (F5)
+• Tarayıcınızı yeniden başlatın
+• Farklı tarayıcı deneyin
+
+📞 Bu mesajı görüyorsanız: support@babyai.com`;
 };
 
 export const getTrends = async () => {

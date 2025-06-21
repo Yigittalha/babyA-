@@ -19,33 +19,23 @@ const AuthModal = ({ onClose, onSuccess }) => {
 
     try {
       if (isLogin) {
-        // Giriş işlemi
-        const response = await apiService.login({
-          email: formData.email,
-          password: formData.password
-        });
-        
-        // Başarılı giriş
-        localStorage.setItem('token', response.access_token);
-        localStorage.setItem('user', JSON.stringify(response.user));
-        
-        // Modal'ı kapat ve başarı callback'ini çağır
-        onSuccess(response.user);
+        // Firebase Auth benzeri giriş işlemi
+        await onSuccess(formData.email, formData.password);
         
       } else {
-        // Kayıt işlemi
+        // Kayıt işlemi - eski API'yi kullan
         const response = await apiService.register({
           email: formData.email,
           password: formData.password,
           name: formData.name
         });
         
-        // Başarılı kayıt
-        localStorage.setItem('token', response.access_token);
-        localStorage.setItem('user', JSON.stringify(response.user));
-        
-        // Modal'ı kapat ve başarı callback'ini çağır
-        onSuccess(response.user);
+        // Kayıttan sonra otomatik giriş yap
+        if (response.success) {
+          await onSuccess(formData.email, formData.password);
+        } else {
+          throw new Error(response.message || 'Kayıt işlemi başarısız');
+        }
       }
     } catch (error) {
       console.error('Auth error:', error);
@@ -53,8 +43,10 @@ const AuthModal = ({ onClose, onSuccess }) => {
       // Hata mesajını göster
       if (error.userMessage) {
         setError(error.userMessage);
-      } else if (error.response?.data?.error) {
-        setError(error.response.data.error);
+      } else if (error.response?.data?.detail) {
+        setError(error.response.data.detail);
+      } else if (error.message) {
+        setError(error.message);
       } else {
         setError('Bir hata oluştu. Lütfen tekrar deneyin.');
       }

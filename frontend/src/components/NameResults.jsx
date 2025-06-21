@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Heart, Star, BookOpen, RefreshCw, Search, ChevronLeft, ChevronRight, Crown, Lock, Check } from 'lucide-react';
+import { Heart, Star, BookOpen, RefreshCw, Search, ChevronLeft, ChevronRight, Crown, Lock, Check, Sparkles } from 'lucide-react';
 import NameAnalysis from './NameAnalysis';
 
 const NameResults = ({ results, onGenerateNew, loading, onAddToFavorites, user, onShowToast, isPremiumRequired, premiumMessage, onShowPremiumUpgrade, blurredNames = [] }) => {
@@ -209,8 +209,8 @@ const NameResults = ({ results, onGenerateNew, loading, onAddToFavorites, user, 
     <div className="max-w-4xl mx-auto mobile-padding">
       {/* Başlık */}
       <div className="text-center mb-8">
-        <h2 className="mobile-text-3xl font-bold text-gradient mb-3">
-          🎉 İsim Önerileriniz Hazır!
+        <h2 className="mobile-text-3xl font-bold text-gray-800 mb-3">
+          İsim Önerileriniz
         </h2>
         <p className="text-gray-600 mobile-text-lg">
           {allNames.length} isim bulundu • Sayfa {currentPage} / {totalPages}
@@ -263,29 +263,29 @@ const NameResults = ({ results, onGenerateNew, loading, onAddToFavorites, user, 
 
       {/* İstatistikler */}
       <div className="mb-8 grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-gradient-to-r from-blue-50 to-purple-50 p-4 rounded-xl border border-blue-100">
+        <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
           <div className="text-center">
-            <div className="text-2xl font-bold text-blue-600">{filteredAndSortedResults.length}</div>
+            <div className="text-2xl font-bold text-gray-800">{filteredAndSortedResults.length}</div>
             <div className="text-sm text-gray-600">Görünen İsim</div>
           </div>
         </div>
-        <div className="bg-gradient-to-r from-amber-50 to-yellow-50 p-4 rounded-xl border border-amber-100">
+        <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
           <div className="text-center">
-            <div className="text-2xl font-bold text-amber-600">{blurredNames.length}</div>
-            <div className="text-sm text-gray-600">🔒 Premium İsim</div>
+            <div className="text-2xl font-bold text-gray-800">{blurredNames.length}</div>
+            <div className="text-sm text-gray-600">Premium İsim</div>
           </div>
         </div>
-        <div className="bg-gradient-to-r from-purple-50 to-pink-50 p-4 rounded-xl border border-purple-100">
+        <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
           <div className="text-center">
-            <div className="text-2xl font-bold text-purple-600">
+            <div className="text-2xl font-bold text-gray-800">
               {filteredAndSortedResults.filter(n => n.popularity === 'modern').length}
             </div>
             <div className="text-sm text-gray-600">Modern</div>
           </div>
         </div>
-        <div className="bg-gradient-to-r from-orange-50 to-red-50 p-4 rounded-xl border border-orange-100">
+        <div className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
           <div className="text-center">
-            <div className="text-2xl font-bold text-orange-600">
+            <div className="text-2xl font-bold text-gray-800">
               {filteredAndSortedResults.filter(n => n.popularity === 'unique').length}
             </div>
             <div className="text-sm text-gray-600">Benzersiz</div>
@@ -299,40 +299,62 @@ const NameResults = ({ results, onGenerateNew, loading, onAddToFavorites, user, 
           const isBlurred = isNameBlurred(name);
           
           return (
-            <div
+                                      <div
               key={`${name.name}-${index}`}
-              className={`modern-card group relative ${isBlurred ? 'cursor-pointer' : ''}`}
+              className={`modern-card group relative ${isBlurred ? 'cursor-pointer premium-card' : 'normal-card'}`}
               onClick={isBlurred ? handleBlurredCardClick : undefined}
             >
-              {/* Premium Overlay - Bulanık isimler için */}
+              {/* Premium Badge */}
               {isBlurred && (
-                <div className="blurred-card-overlay" onClick={handleBlurredCardClick}>
-                  <div className="blurred-card-content">
-                    <Lock className="w-12 h-12 text-white mx-auto mb-3 drop-shadow-lg" />
-                    <h3 className="text-white font-bold text-lg mb-2 drop-shadow-lg">
+                <div className="absolute top-3 right-3 z-20">
+                  <div className="bg-gradient-to-r from-yellow-400 to-yellow-600 text-yellow-900 px-3 py-1 rounded-full text-xs font-bold flex items-center space-x-1 shadow-lg animate-pulse">
+                    <Crown className="w-3 h-3" />
+                    <span>Premium</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Elegant Premium Overlay */}
+              {isBlurred && (
+                <div className="absolute inset-0 bg-gradient-to-br from-purple-50/95 via-pink-50/95 to-blue-50/95 backdrop-blur-sm rounded-xl flex items-center justify-center" onClick={handleBlurredCardClick}>
+                  <div className="text-center p-6 max-w-xs">
+                    <div className="relative mb-4">
+                      <div className="w-16 h-16 bg-gradient-to-br from-purple-400 to-pink-500 rounded-full flex items-center justify-center mx-auto shadow-2xl">
+                        <Lock className="w-8 h-8 text-white" />
+                      </div>
+                      <div className="absolute -top-1 -right-1 animate-bounce">
+                        <Crown className="w-6 h-6 text-yellow-500" />
+                      </div>
+                    </div>
+                    <h4 className="text-lg font-bold text-gray-800 mb-2">
                       Premium İçerik
-                    </h3>
-                    <p className="text-white/90 text-sm drop-shadow-lg">
-                      Bu ismi görmek için Premium üye olun
+                    </h4>
+                    <p className="text-gray-600 text-sm font-medium mb-4 leading-relaxed">
+                      Bu özel isim Premium üyeler için ayrılmıştır. Sınırsız erişim için üyelik alın!
                     </p>
                     <button
-                      className="blurred-card-button"
+                      className="px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-sm font-bold rounded-xl hover:shadow-xl transition-all duration-300 transform hover:scale-105 flex items-center space-x-2 mx-auto"
                       onClick={(e) => {
                         e.stopPropagation();
                         onShowPremiumUpgrade();
                       }}
                     >
-                      Premium Ol
+                      <Crown className="w-4 h-4" />
+                      <span>Premium Ol</span>
+                      <Sparkles className="w-4 h-4" />
                     </button>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Sadece $7.99/ay • İstediğin zaman iptal et
+                    </p>
                   </div>
                 </div>
               )}
 
-              {/* Bulanık Efekt */}
-              <div className={isBlurred ? 'blurred-card' : ''}>
+              {/* İçerik */}
+              <div className={isBlurred ? 'opacity-30' : ''}>
                 {/* İsim */}
                 <div className="text-center mb-4">
-                  <h3 className="mobile-text-2xl font-bold text-gradient mb-3">
+                  <h3 className="mobile-text-2xl font-bold text-gray-800 mb-3">
                     {name.name}
                   </h3>
                   
@@ -402,39 +424,44 @@ const NameResults = ({ results, onGenerateNew, loading, onAddToFavorites, user, 
                 )}
 
                 {/* Aksiyon Butonları */}
-                <div className="flex space-x-2 pt-4 border-t border-gray-100">
-                  <button
-                    className="flex-1 bg-gradient-to-r from-pink-50 to-purple-50 hover:from-pink-100 hover:to-purple-100 text-pink-600 py-3 px-4 rounded-xl text-sm font-semibold transition-all duration-300 flex items-center justify-center space-x-2 touch-button hover:shadow-md"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleAddToFavorites(name);
-                    }}
-                    title={user ? "Favorilere ekle" : "Favori eklemek için giriş yapın"}
-                  >
-                    <Heart className="w-4 h-4" />
-                    <span>{user ? "Favorilere Ekle" : "Giriş Gerekli"}</span>
-                  </button>
+                <div className="pt-4 border-t border-gray-100 space-y-2">
+                  {/* İlk Satır - Favorilere Ekle ve Kopyala */}
+                  <div className="flex space-x-2">
+                    <button
+                      className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 px-3 rounded-lg text-sm font-medium transition-colors flex items-center justify-center space-x-2"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleAddToFavorites(name);
+                      }}
+                      title={user ? "Favorilere ekle" : "Favori eklemek için giriş yapın"}
+                    >
+                      <Heart className="w-4 h-4" />
+                      <span className="hidden sm:inline">{user ? "Favorilere Ekle" : "Giriş Gerekli"}</span>
+                      <span className="sm:hidden">Favori</span>
+                    </button>
                   
+                    <button
+                      className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 px-3 rounded-lg text-sm font-medium transition-colors flex items-center justify-center space-x-2"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCopyName(name.name);
+                      }}
+                    >
+                      <span>📋 Kopyala</span>
+                    </button>
+                  </div>
+                  
+                  {/* İkinci Satır - Analiz (Tam Genişlik) */}
                   <button
-                    className="flex-1 bg-gradient-to-r from-blue-50 to-cyan-50 hover:from-blue-100 hover:to-cyan-100 text-blue-600 py-3 px-4 rounded-xl text-sm font-semibold transition-all duration-300 flex items-center justify-center space-x-2 touch-button hover:shadow-md"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleCopyName(name.name);
-                    }}
-                  >
-                    <span>Kopyala</span>
-                  </button>
-
-                  <button
-                    className="flex-1 bg-gradient-to-r from-green-50 to-emerald-50 hover:from-green-100 hover:to-emerald-100 text-green-600 py-3 px-4 rounded-xl text-sm font-semibold transition-all duration-300 flex items-center justify-center space-x-2 touch-button hover:shadow-md"
+                    className="w-full bg-gray-800 hover:bg-gray-700 text-white py-3 px-4 rounded-lg text-sm font-medium transition-colors flex items-center justify-center space-x-2"
                     onClick={(e) => {
                       e.stopPropagation();
                       handleAnalyzeName(name.name, name.language || 'turkish');
                     }}
-                    title="Detaylı analiz"
+                    title="İsmin detaylı analizini görüntüle"
                   >
                     <Search className="w-4 h-4" />
-                    <span>Analiz</span>
+                    <span>🔍 Detaylı Analiz</span>
                   </button>
                 </div>
 
@@ -452,9 +479,9 @@ const NameResults = ({ results, onGenerateNew, loading, onAddToFavorites, user, 
 
       {/* Alt Bilgi */}
       <div className="mt-12 text-center">
-        <div className="bg-gradient-to-r from-pink-50 to-purple-50 rounded-xl p-6 mobile-card">
+        <div className="bg-gray-50 rounded-lg p-6 mobile-card">
           <h3 className="mobile-text-xl font-semibold text-gray-800 mb-2">
-            💡 İpuçları
+            İpuçları
           </h3>
           <div className="mobile-grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600">
             <div>
