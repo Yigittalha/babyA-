@@ -353,30 +353,34 @@ async def get_current_user_enhanced(
         import os
         
         db_path = os.path.join(os.path.dirname(__file__), '..', 'baby_names.db')
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        # Check if user session was invalidated after token was issued
-        cursor.execute("""
-            SELECT COUNT(*) as count
-            FROM invalidated_sessions 
-            WHERE user_id = ? 
-            AND datetime(invalidated_at) > datetime(?, 'unixepoch')
-        """, (user_id, token_issued_at))
-        
-        result = cursor.fetchone()
-        invalidation_count = result[0] if result else 0
-        conn.close()
-        
-        if invalidation_count > 0:
-            logger.warning(f"🔐 Session invalidated for user {user_id} - forcing re-login")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Your account has been updated. Please login again to access new features.",
-                headers={"X-Force-Relogin": "true"}
-            )
+        conn = None
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            
+            # Check if user session was invalidated after token was issued
+            cursor.execute("""
+                SELECT COUNT(*) as count
+                FROM invalidated_sessions 
+                WHERE user_id = ? 
+                AND datetime(invalidated_at) > datetime(?, 'unixepoch')
+            """, (user_id, token_issued_at))
+            
+            result = cursor.fetchone()
+            invalidation_count = result[0] if result else 0
+            
+            if invalidation_count > 0:
+                logger.warning(f"🔐 Session invalidated for user {user_id} - forcing re-login")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Your account has been updated. Please login again to access new features.",
+                    headers={"X-Force-Relogin": "true"}
+                )
+        finally:
+            if conn:
+                conn.close()
     except Exception as e:
-        logger.error(f"Session validation error for user {user_id}: {e}")
+        logger.error(f"Error checking session validity for user {user_id}: {e}")
         # Don't fail on session validation error in production - continue normally
         pass
     

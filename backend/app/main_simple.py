@@ -2397,65 +2397,77 @@ async def get_admin_stats(user_id: Optional[int] = Depends(verify_token_optional
         except Exception as db_error:
             logger.warning(f"Admin check failed: {db_error}")
         
-        # Try to get real stats from database
+        # Initialize variables first to prevent "local variable not associated" errors
+        total_users = 0
+        total_favorites = 0
+        recent_registrations = 0
+        premium_users = 0
+        
+        # Get real stats from database
         try:
-            total_users = await db_manager.get_user_count()
+            all_users = await db_manager.get_all_users(1, 1000)
+            total_users = len(all_users)
             total_favorites = await db_manager.get_favorite_count()
-            recent_registrations = await db_manager.get_recent_registrations(24)
+            recent_registrations = len([u for u in all_users if u.get('created_at', '').startswith('2024')])
             
-            # Premium kullanıcı sayısını hesapla - UPDATED: Only count standard and premium plans as paid users
-            premium_users = 0
+            # Premium users calculation with error handling
             try:
-                all_users = await db_manager.get_all_users(1, 1000)  # Tüm kullanıcıları al
                 premium_users = len([u for u in all_users if u.get('subscription_type') in ['standard', 'premium']])
                 logger.debug(f"Paid user count: {premium_users} (includes standard and premium plans)")
             except Exception as e:
                 logger.warning(f"Paid user count calculation failed: {e}")
+                premium_users = 0
             
-                            # Calculate real revenue from ACTIVE premium users only - ENHANCED ACCURACY
-                total_revenue_month = 0
-                total_revenue_today = 0
+            # Initialize revenue variables before calculations - FIX for "local variable not associated" error
+            total_revenue_month = 0.0
+            total_revenue_today = 0.0
+            
+            # Calculate real revenue from ACTIVE premium users only - ENHANCED ACCURACY
+            try:
+                import sqlite3
+                cursor = db_manager.connection.cursor()
+                
+                # Monthly revenue: Calculate based on current active subscriptions
+                # More accurate: Only count users with active paid plans
+                cursor.execute("""
+                    SELECT SUM(
+                        CASE 
+                            WHEN u.subscription_type = 'standard' THEN 4.99
+                            WHEN u.subscription_type = 'premium' THEN 8.99
+                            ELSE 0
+                        END
+                    ) as monthly_revenue
+                    FROM users u
+                    WHERE u.subscription_type IN ('standard', 'premium')
+                    AND (u.subscription_expires IS NULL OR u.subscription_expires >= datetime('now'))
+                """)
+                monthly_result = cursor.fetchone()
+                total_revenue_month = float(monthly_result[0]) if monthly_result and monthly_result[0] else 0.0
+                
+                # Today's revenue: New subscriptions activated today
+                cursor.execute("""
+                    SELECT SUM(payment_amount) 
+                    FROM subscription_history
+                    WHERE DATE(started_at) = DATE('now')
+                    AND subscription_type IN ('standard', 'premium')
+                    AND payment_amount > 0
+                    AND status = 'active'
+                """)
+                today_result = cursor.fetchone()
+                total_revenue_today = float(today_result[0]) if today_result and today_result[0] else 0.0
+                
+            except Exception as revenue_error:
+                logger.warning(f"Revenue calculation failed: {revenue_error}")
+                # Fallback: Calculate from user count * price
                 try:
-                    import sqlite3
-                    cursor = db_manager.connection.cursor()
-                    
-                    # Monthly revenue: Calculate based on current active subscriptions
-                    # More accurate: Only count users with active paid plans
-                    cursor.execute("""
-                        SELECT SUM(
-                            CASE 
-                                WHEN u.subscription_type = 'standard' THEN 4.99
-                                WHEN u.subscription_type = 'premium' THEN 8.99
-                                ELSE 0
-                            END
-                        ) as monthly_revenue
-                        FROM users u
-                        WHERE u.subscription_type IN ('standard', 'premium')
-                        AND (u.subscription_expires IS NULL OR u.subscription_expires >= datetime('now'))
-                    """)
-                    monthly_result = cursor.fetchone()
-                    total_revenue_month = float(monthly_result[0]) if monthly_result and monthly_result[0] else 0.0
-                    
-                    # Today's revenue: New subscriptions activated today
-                    cursor.execute("""
-                        SELECT SUM(payment_amount) 
-                        FROM subscription_history
-                        WHERE DATE(started_at) = DATE('now')
-                        AND subscription_type IN ('standard', 'premium')
-                        AND payment_amount > 0
-                        AND status = 'active'
-                    """)
-                    today_result = cursor.fetchone()
-                    total_revenue_today = float(today_result[0]) if today_result and today_result[0] else 0.0
-                    
-                except Exception as revenue_error:
-                    logger.warning(f"Revenue calculation failed: {revenue_error}")
-                    # Fallback: Calculate from user count * price
                     if premium_users > 0:
                         # Estimate based on average plan price
                         total_revenue_month = premium_users * 6.99  # Average of 4.99 and 8.99
                     else:
                         total_revenue_month = 0.0
+                    total_revenue_today = 0.0
+                except:
+                    total_revenue_month = 0.0
                     total_revenue_today = 0.0
             
             return {

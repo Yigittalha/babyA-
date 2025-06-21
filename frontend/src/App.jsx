@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { Baby, Sparkles, Heart, Star, User, LogOut, Settings, Search, Plus, TrendingUp, Home, Crown, HelpCircle } from 'lucide-react';
+import { Baby, Heart, User, LogOut, Settings, Crown } from 'lucide-react';
 import NameForm from './components/NameForm';
 import NameResults from './components/NameResults';
 import NameAnalysis from './components/NameAnalysis';

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Crown, Check, Star, Zap, Shield, Users, Clock, CreditCard, X, TrendingUp, Globe, MessageCircle, ArrowLeft, Lock, CheckCircle, User, Calendar, Mail } from 'lucide-react';
+import { Crown, Check, Shield, CreditCard, X, ArrowLeft, Lock, CheckCircle, User, Calendar } from 'lucide-react';
 import { getSubscriptionPlans, getSubscriptionStatus, upgradeSubscription } from '../services/api';
 
 const PremiumUpgrade = ({ onClose, onUpgrade }) => {
@@ -66,7 +66,7 @@ const PremiumUpgrade = ({ onClose, onUpgrade }) => {
             type: 'standard',
             name: 'Standard Family',
             price: 4.99,
-            originalPrice: 7.99,
+            originalPrice: 8.99,
             duration_days: 30,
             popular: false,
             yearlyPrice: 49.99,

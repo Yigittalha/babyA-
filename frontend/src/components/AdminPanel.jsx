@@ -2,12 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
 import sessionManager from '../services/sessionManager';
 import { 
-  Shield, Users, BarChart3, Settings, Crown, Baby, Star, TrendingUp, Heart, 
-  Zap, Lock, Sparkles, RefreshCw, Search, Filter, ChevronDown, ChevronUp,
-  Eye, EyeOff, Trash2, Edit, Plus, Activity, Database, Server, DollarSign,
-  Globe, Smartphone, Monitor, MapPin, Calendar, Clock, Target, LineChart,
-  PieChart, BarChart, Wifi, UserCheck, UserX, MousePointer
+  Shield, Users, Activity, RefreshCw, Search, ChevronDown, ChevronUp,
+  Trash2, Edit, Server, DollarSign, Wifi, UserCheck, UserX
 } from 'lucide-react';
+import { safeNumber, formatCurrency, formatNumber } from '../utils/formatters';
 import {
   LineChart as RechartsLineChart,
   AreaChart,
@@ -79,24 +77,7 @@ const AdminPanel = ({ onShowToast }) => {
   // Toast notifications
   const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
 
-  // Utility functions
-  const safeNumber = useCallback((value, fallback = 0) => {
-    if (value === null || value === undefined || value === '' || value === 'NaN') return fallback;
-    const num = Number(value);
-    return (isNaN(num) || !isFinite(num) || num < 0) ? fallback : num;
-  }, []);
-
-  const formatCurrency = useCallback((value) => {
-    const num = safeNumber(value, 0);
-    return `$${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  }, [safeNumber]);
-
-  const formatNumber = useCallback((value) => {
-    const num = safeNumber(value, 0);
-    if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
-    if (num >= 1000) return `${(num / 1000).toFixed(1)}K`;
-    return num.toLocaleString();
-  }, [safeNumber]);
+  // Utility functions artık formatters.js'ten import ediliyor
 
   // Use parent's showToast instead of local one
   const showToast = onShowToast || (({ message, type = 'info' }) => {

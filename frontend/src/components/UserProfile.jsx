@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Heart, Star, Calendar, Mail, Shield, Activity, Crown, Lock, Sparkles, Baby, Gift, Zap, TrendingUp, Settings, LogOut } from 'lucide-react';
+import { User, Heart, Star, Calendar, Mail, Shield, Crown, Lock, Sparkles, Baby, TrendingUp, Settings } from 'lucide-react';
 import { apiService } from '../services/api';
 import { onAuthStateChanged } from '../services/authStateManager';
 
@@ -480,7 +480,7 @@ const UserProfile = ({ user, onClose, onUpdate, onShowToast }) => {
                   <p className="text-purple-700 mb-4">Sınırsız isim üretimi ve özel özellikler için Premium üye olun!</p>
                   <button className="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-6 py-3 rounded-xl font-bold hover:shadow-lg transition-all duration-300 transform hover:scale-105">
                     <Crown className="w-5 h-5 inline mr-2" />
-                    Premium Ol - Sadece $7.99/ay
+                    Premium Ol - Sadece $8.99/ay
                   </button>
                 </div>
               )}

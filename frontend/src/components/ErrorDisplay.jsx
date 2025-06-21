@@ -149,7 +149,7 @@ const ErrorDisplay = ({ error, onRetry, onGenerateNew, onPremiumUpgrade }) => {
                   className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-8 py-3 rounded-xl font-semibold transition-all duration-300 flex items-center justify-center space-x-2 shadow-lg hover:shadow-xl transform hover:scale-105"
                 >
                   <Crown className="w-5 h-5" />
-                                      <span>Premium'a Geç ($7.99/ay)</span>
+                                      <span>Premium'a Geç ($8.99/ay)</span>
                 </button>
               )}
               

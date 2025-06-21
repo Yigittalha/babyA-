@@ -344,7 +344,7 @@ const NameResults = ({ results, onGenerateNew, loading, onAddToFavorites, user, 
                       <Sparkles className="w-4 h-4" />
                     </button>
                     <p className="text-xs text-gray-500 mt-2">
-                      Sadece $7.99/ay • İstediğin zaman iptal et
+                      Sadece $8.99/ay • İstediğin zaman iptal et
                     </p>
                   </div>
                 </div>
