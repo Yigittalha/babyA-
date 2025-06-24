@@ -349,9 +349,7 @@ async def get_current_user_enhanced(
     
     try:
         # Use raw database connection to check session invalidation
-        import sqlite3
-        import os
-        
+        import sqlite3        
         db_path = os.path.join(os.path.dirname(__file__), '..', 'baby_names.db')
         conn = None
         try:
@@ -570,7 +568,7 @@ class PlanRateLimiter:
     
     def check_rate_limit(self, user_id: int, user_plan: str) -> bool:
         """Check if user has exceeded rate limit"""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         user_key = f"user_{user_id}"
         
         if user_key not in self.request_history:
